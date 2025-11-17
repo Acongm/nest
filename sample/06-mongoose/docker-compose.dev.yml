@@ -12,6 +12,8 @@ services:
     volumes:
       - mongodb_data:/data/db
     command: ["--noauth"]
+    networks:
+      - nestjs-network
 
   app:
     build:

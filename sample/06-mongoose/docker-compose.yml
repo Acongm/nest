@@ -14,6 +14,8 @@ services:
     # 注意：MongoDB 6.0+ 默认启用认证
     # 开发环境禁用认证
     command: ["--noauth"]
+    networks:
+      - nestjs-network
 
   app:
     build:

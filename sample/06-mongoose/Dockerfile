@@ -1,4 +1,5 @@
-# 使用官方 Node.js 镜像
+# 使用官方镜像，通过 Docker Desktop 配置镜像加速器来加速
+# 如果直接使用镜像源失败，请配置 Docker Desktop -> Settings -> Docker Engine -> registry-mirrors
 FROM node:20-alpine
 
 # 设置工作目录
