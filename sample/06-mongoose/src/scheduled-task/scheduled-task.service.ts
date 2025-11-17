@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CreateScheduledTaskDto } from './dto';
 import { ScheduledTask, ScheduledTaskDocument } from './schemas/scheduled-task.schema';
 import { TaskValidator } from './utils/task-validator.util';
 import { TaskUpdater } from './utils/task-updater.util';
+import { ScheduledTaskSchedulerService } from './scheduled-task-scheduler.service';
 
 /**
  * 定时任务服务类
@@ -21,12 +22,15 @@ export class ScheduledTaskService {
   private readonly SYSTEM_TASK_ID = 'security-operations-report-system';
 
   /**
-   * 构造函数，注入 Mongoose Model
+   * 构造函数，注入 Mongoose Model 和调度服务
    * @param {Model<ScheduledTaskDocument>} taskModel - 定时任务 Mongoose Model
+   * @param {ScheduledTaskSchedulerService} schedulerService - 定时任务调度服务
    */
   constructor(
     @InjectModel(ScheduledTask.name)
     private taskModel: Model<ScheduledTaskDocument>,
+    @Inject(forwardRef(() => ScheduledTaskSchedulerService))
+    private schedulerService: ScheduledTaskSchedulerService,
   ) {}
 
   /**
@@ -52,15 +56,23 @@ export class ScheduledTaskService {
   async createOrUpdate(taskData: CreateScheduledTaskDto): Promise<ScheduledTask> {
     const taskId = this.SYSTEM_TASK_ID;
 
+    let updatedTask: ScheduledTask;
+
     // 如果是关闭操作（enable: false），只更新 enable 字段
     if (!taskData.enable) {
-      return await TaskUpdater.disableTask(this.taskModel, taskId);
+      updatedTask = await TaskUpdater.disableTask(this.taskModel, taskId);
+      // 取消调度
+      this.schedulerService.unscheduleTask(taskId);
+    } else {
+      // enable: true 时，验证必填字段
+      TaskValidator.validateEnableTask(taskData);
+
+      // 启用或更新任务
+      updatedTask = await TaskUpdater.enableOrUpdateTask(this.taskModel, taskId, taskData);
+      // 重新调度任务
+      await this.schedulerService.rescheduleTask(taskId);
     }
 
-    // enable: true 时，验证必填字段
-    TaskValidator.validateEnableTask(taskData);
-
-    // 启用或更新任务
-    return await TaskUpdater.enableOrUpdateTask(this.taskModel, taskId, taskData);
+    return updatedTask;
   }
 }
