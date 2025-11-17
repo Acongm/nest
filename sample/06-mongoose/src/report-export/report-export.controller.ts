@@ -13,6 +13,7 @@ import { Request, Response } from 'express';
 import { ReportExportService } from './report-export.service';
 import { CreateExportTaskDto } from './dto/create-export-task.dto';
 import { readFileSync, existsSync } from 'fs';
+import { isCurrentUserData } from '../auth/decorators/current-user.decorator';
 
 /**
  * 报表导出控制器
@@ -30,8 +31,11 @@ export class ReportExportController {
     @Req() reqRequest: Request,
     @Body() data: CreateExportTaskDto,
   ) {
-    // 从 reqRequest.user 获取用户信息（类型已通过 express.d.ts 扩展定义）
-    const tenantId = reqRequest.user!.tenantId;
+    // 使用类型守卫来帮助 TypeScript 识别类型
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
 
     return this.reportExportService.createExportTask(data, tenantId);
   }
@@ -46,7 +50,10 @@ export class ReportExportController {
     @Req() reqRequest: Request,
     @Query('assetId') assetId: string | undefined,
   ) {
-    const tenantId = reqRequest.user!.tenantId;
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
     const tasks = await this.reportExportService.findAll(tenantId, assetId);
     return {
       tasks,
@@ -60,7 +67,10 @@ export class ReportExportController {
    */
   @Get('queue/status')
   async getQueueStatus(@Req() reqRequest: Request) {
-    const tenantId = reqRequest.user!.tenantId;
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
     return this.reportExportService.getQueueStatus(tenantId);
   }
 
@@ -73,7 +83,10 @@ export class ReportExportController {
     @Req() reqRequest: Request,
     @Param('id') id: string,
   ) {
-    const tenantId = reqRequest.user!.tenantId;
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
     return this.reportExportService.findOne(id, tenantId);
   }
 
@@ -88,7 +101,10 @@ export class ReportExportController {
     @Res() res: Response,
   ) {
     try {
-      const tenantId = reqRequest.user!.tenantId;
+      if (!isCurrentUserData(reqRequest.user)) {
+        throw new Error('用户未认证');
+      }
+      const tenantId = reqRequest.user.tenantId;
       const filePath = await this.reportExportService.getTaskFilePath(id, tenantId);
       
       if (!existsSync(filePath)) {

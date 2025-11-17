@@ -1,0 +1,101 @@
+npm verbose cli /Users/acongm/.nvm/versions/node/v20.19.1/bin/node /Users/acongm/.nvm/versions/node/v20.19.1/bin/npm
+npm info using npm@11.4.1
+npm info using node@v20.19.1
+npm verbose title npm install
+npm verbose argv "install" "--loglevel" "verbose"
+npm verbose logfile logs-max:10 dir:/Users/acongm/.npm/_logs/2025-11-17T17_28_50_644Z-
+npm verbose logfile /Users/acongm/.npm/_logs/2025-11-17T17_28_50_644Z-debug-0.log
+npm http fetch GET 200 https://registry.npmmirror.com/@msgpackr-extract%2fmsgpackr-extract-darwin-arm64 245ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@msgpackr-extract%2fmsgpackr-extract-linux-arm 79ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@msgpackr-extract%2fmsgpackr-extract-linux-arm64 74ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@msgpackr-extract%2fmsgpackr-extract-linux-x64 77ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@msgpackr-extract%2fmsgpackr-extract-win32-x64 73ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-win32-x64-msvc 74ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-win32-arm64-msvc 132ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-win32-ia32-msvc 75ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-x64-gnu 82ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-x64-musl 112ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-freebsd-x64 70ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-android-arm64 68ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-arm64-gnu 66ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-arm64-musl 75ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-android-arm-eabi 69ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-arm-gnueabihf 70ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-arm-musleabihf 76ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-ppc64-gnu 70ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-riscv64-gnu 71ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-riscv64-musl 69ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-linux-s390x-gnu 75ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-darwin-arm64 68ms (cache miss)
+npm http fetch GET 200 https://registry.npmmirror.com/@unrs%2fresolver-binding-wasm32-wasi 71ms (cache miss)
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-win32-x64-msvc
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-win32-ia32-msvc
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-win32-arm64-msvc
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-wasm32-wasi
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/@napi-rs/wasm-runtime
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/@emnapi/core
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/@emnapi/runtime
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/@tybys/wasm-util
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/@emnapi/wasi-threads
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-x64-musl
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-x64-gnu
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-s390x-gnu
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-riscv64-musl
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-riscv64-gnu
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-ppc64-gnu
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-arm64-musl
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-arm64-gnu
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-arm-musleabihf
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-linux-arm-gnueabihf
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-freebsd-x64
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-darwin-arm64
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-android-arm64
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/unrs-resolver/node_modules/@unrs/resolver-binding-android-arm-eabi
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/msgpackr-extract/node_modules/@msgpackr-extract/msgpackr-extract-win32-x64
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/msgpackr-extract/node_modules/@msgpackr-extract/msgpackr-extract-linux-x64
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/msgpackr-extract/node_modules/@msgpackr-extract/msgpackr-extract-linux-arm64
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/msgpackr-extract/node_modules/@msgpackr-extract/msgpackr-extract-linux-arm
+npm verbose reify failed optional dependency /Users/acongm/code/coding/nest/sample/06-mongoose/node_modules/msgpackr-extract/node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64
+npm http fetch POST 404 https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk 104ms
+npm verbose audit error HttpErrorGeneral: 404 Not Found - POST https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk - [NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet
+npm verbose audit error     at /Users/acongm/.nvm/versions/node/v20.19.1/lib/node_modules/npm/node_modules/npm-registry-fetch/lib/check-response.js:103:15
+npm verbose audit error     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+npm verbose audit error     at async [getReport] (/Users/acongm/.nvm/versions/node/v20.19.1/lib/node_modules/npm/node_modules/@npmcli/arborist/lib/audit-report.js:294:19)
+npm verbose audit error     at async AuditReport.run (/Users/acongm/.nvm/versions/node/v20.19.1/lib/node_modules/npm/node_modules/@npmcli/arborist/lib/audit-report.js:106:19) {
+npm verbose audit error   headers: [Object: null prototype] {
+npm verbose audit error     server: [ 'Tengine' ],
+npm verbose audit error     date: [ 'Mon, 17 Nov 2025 17:28:59 GMT' ],
+npm verbose audit error     'content-type': [ 'application/json' ],
+npm verbose audit error     'transfer-encoding': [ 'chunked' ],
+npm verbose audit error     connection: [ 'keep-alive' ],
+npm verbose audit error     'strict-transport-security': [ 'max-age=5184000' ],
+npm verbose audit error     via: [ 'kunlun8.cn8358[,404666]' ],
+npm verbose audit error     'timing-allow-origin': [ '*' ],
+npm verbose audit error     eagleid: [ '7544591c17634005397985741e' ],
+npm verbose audit error     'x-fetch-attempts': [ '1' ]
+npm verbose audit error   },
+npm verbose audit error   statusCode: 404,
+npm verbose audit error   code: 'E404',
+npm verbose audit error   method: 'POST',
+npm verbose audit error   uri: 'https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk',
+npm verbose audit error   body: {
+npm verbose audit error     error: '[NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet'
+npm verbose audit error   },
+npm verbose audit error   pkgid: undefined
+npm verbose audit error }
+
+> nest-typescript-starter@1.0.0 postinstall
+> echo '提示: 如果 Puppeteer 下载慢，请运行 npm run install:fast 或查看 docs/puppeteer-speedup-guide.md'
+
+提示: 如果 Puppeteer 下载慢，请运行 npm run install:fast 或查看 docs/puppeteer-speedup-guide.md
+
+added 23 packages, and removed 23 packages in 10s
+
+142 packages are looking for funding
+  run `npm fund` for details
+npm verbose cwd /Users/acongm/code/coding/nest/sample/06-mongoose
+npm verbose os Darwin 21.6.0
+npm verbose node v20.19.1
+npm verbose npm  v11.4.1
+npm verbose exit 0
+npm info ok

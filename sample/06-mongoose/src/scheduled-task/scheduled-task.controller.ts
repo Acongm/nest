@@ -3,6 +3,7 @@ import { Request } from 'express';
 import { ScheduledTaskService } from './scheduled-task.service';
 import { CreateScheduledTaskDto } from './dto';
 import { ScheduledTask } from './scheduled-task.interface';
+import { isCurrentUserData } from '../auth/decorators/current-user.decorator';
 
 /**
  * 定时任务控制器
@@ -24,8 +25,11 @@ export class ScheduledTaskController {
    */
   @Get()
   async findAll(@Req() reqRequest: Request): Promise<{ tasks: ScheduledTask[]; tasksCount: number }> {
-    // 从 reqRequest.user 获取用户信息（类型已通过 express.d.ts 扩展定义）
-    const tenantId = reqRequest.user!.tenantId;
+    // 使用类型守卫来帮助 TypeScript 识别类型
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
 
     const tasks = await this.scheduledTaskService.findAll(tenantId);
     return {
@@ -48,8 +52,11 @@ export class ScheduledTaskController {
     @Req() reqRequest: Request,
     @Body() data: CreateScheduledTaskDto,
   ): Promise<ScheduledTask> {
-    // 从 reqRequest.user 获取用户信息（类型已通过 express.d.ts 扩展定义）
-    const tenantId = reqRequest.user!.tenantId;
+    // 使用类型守卫来帮助 TypeScript 识别类型
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
 
     return await this.scheduledTaskService.createOrUpdate(data, tenantId);
   }

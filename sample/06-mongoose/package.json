@@ -18,6 +18,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "echo 'No e2e tests implemented yet.'",
     "install:fast": "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install",
+    "install:debug": "bash install-debug.sh",
     "postinstall": "echo '提示: 如果 Puppeteer 下载慢，请运行 npm run install:fast 或查看 docs/puppeteer-speedup-guide.md'"
   },
   "dependencies": {
@@ -90,5 +91,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "overrides": {
+    "glob": "^11.0.0"
   }
 }

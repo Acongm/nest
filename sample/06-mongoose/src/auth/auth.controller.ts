@@ -5,6 +5,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { Public } from './decorators/public.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { isCurrentUserData } from './decorators/current-user.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -69,14 +70,16 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   async getCurrentUser(@Req() reqRequest: Request) {
-    // 从 reqRequest.user 获取用户信息（类型已通过 express.d.ts 扩展定义）
-    const user = reqRequest.user!;
+    // 使用类型守卫来帮助 TypeScript 识别类型
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
 
     return {
-      userId: user.userId,
-      tenantId: user.tenantId,
-      companyId: user.companyId,
-      username: user.username,
+      userId: reqRequest.user.userId,
+      tenantId: reqRequest.user.tenantId,
+      companyId: reqRequest.user.companyId,
+      username: reqRequest.user.username,
     };
   }
 }
