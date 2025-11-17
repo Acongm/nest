@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { logger } from './common/logger';
 
@@ -14,6 +15,9 @@ async function bootstrap() {
   }
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  
+  // 启用 cookie 解析中间件
+  app.use(cookieParser());
   
   // 设置全局路由前缀（API 接口）
   app.setGlobalPrefix('api');
@@ -38,7 +42,7 @@ async function bootstrap() {
     }),
   );
   
-  // SPA 路由回退：所有非 API 路由都返回 index.html（支持前端路由）
+  // 路由处理：根据路径返回对应的 HTML 文件
   app.use((req, res, next) => {
     // 如果是 API 请求，跳过
     if (req.path.startsWith('/api')) {
@@ -50,14 +54,31 @@ async function bootstrap() {
       return next();
     }
     
-    // 其他所有请求都返回 index.html（支持前端路由）
+    let htmlFile = 'index.html';
+    
+    // 根据路径返回对应的 HTML 文件
+    if (req.path === '/login' || req.path.startsWith('/login')) {
+      htmlFile = 'login.html';
+    } else if (req.path === '/register' || req.path.startsWith('/register')) {
+      htmlFile = 'register.html';
+    }
+    
     try {
-      const indexHtml = readFileSync(join(publicPath, 'index.html'), 'utf-8');
-      res.setHeader('Content-Type', 'text/html');
-      res.send(indexHtml);
+      const htmlPath = join(publicPath, htmlFile);
+      if (existsSync(htmlPath)) {
+        const html = readFileSync(htmlPath, 'utf-8');
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+      } else {
+        res.status(404).send(`File not found: ${htmlFile}`);
+      }
     } catch (error) {
-      // 如果 index.html 不存在，返回 404
-      res.status(404).send('Frontend files not found. Please build your frontend and place files in the "public" folder.');
+      logger.error('读取 HTML 文件失败', {
+        path: req.path,
+        htmlFile,
+        error: error.message,
+      });
+      res.status(500).send('Internal server error');
     }
   });
   

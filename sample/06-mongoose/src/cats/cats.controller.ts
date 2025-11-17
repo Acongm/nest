@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { CatsService } from './cats.service';
 import { CreateCatDto } from './dto/create-cat.dto';
 import { UpdateCatDto } from './dto/update-cat.dto';
@@ -9,27 +10,29 @@ export class CatsController {
   constructor(private readonly catsService: CatsService) {}
 
   @Post()
-  async create(@Body() createCatDto: CreateCatDto) {
-    return this.catsService.create(createCatDto);
+  async create(@Req() reqRequest: Request, @Body() data: CreateCatDto) {
+    // @Body() 装饰器：从请求体中提取并验证数据
+    // @Req() 装饰器：注入 Express Request 对象
+    return this.catsService.create(data);
   }
 
   @Get()
-  async findAll(): Promise<Cat[]> {
+  async findAll(@Req() reqRequest: Request): Promise<Cat[]> {
     return this.catsService.findAll();
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<Cat> {
+  async findOne(@Req() reqRequest: Request, @Param('id') id: string): Promise<Cat> {
     return this.catsService.findOne(id);
   }
 
   @Post(':id')
-  async update(@Param('id') id: string, @Body() updateCatDto: UpdateCatDto) {
-    return this.catsService.update(id, updateCatDto);
+  async update(@Req() reqRequest: Request, @Param('id') id: string, @Body() data: UpdateCatDto) {
+    return this.catsService.update(id, data);
   }
 
   @Delete(':id')
-  async delete(@Param('id') id: string) {
+  async delete(@Req() reqRequest: Request, @Param('id') id: string) {
     return this.catsService.delete(id);
   }
 }

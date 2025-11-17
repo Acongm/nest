@@ -53,18 +53,26 @@ const logger = winston.createLogger({
  * 获取 Chrome 可执行文件路径
  */
 function getChromeExecutablePath(): string | undefined {
+  // 优先使用环境变量指定的路径（Docker 环境）
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    if (existsSync(envPath)) {
+      return envPath;
+    }
+  }
+
   // macOS
   const macPath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (process.platform === 'darwin' && existsSync(macPath)) {
     return macPath;
   }
 
-  // Linux
+  // Linux（包括 Docker 环境）
   const linuxPaths = [
+    '/usr/bin/chromium-browser',  // Docker Alpine 中的路径
+    '/usr/bin/chromium',
     '/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
   ];
   if (process.platform === 'linux') {
     for (const path of linuxPaths) {

@@ -7,8 +7,9 @@ import {
   Res,
   Query,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { ReportExportService } from './report-export.service';
 import { CreateExportTaskDto } from './dto/create-export-task.dto';
 import { readFileSync, existsSync } from 'fs';
@@ -25,8 +26,14 @@ export class ReportExportController {
    * @route POST /api/report-export
    */
   @Post()
-  async createExportTask(@Body() createDto: CreateExportTaskDto) {
-    return this.reportExportService.createExportTask(createDto);
+  async createExportTask(
+    @Req() reqRequest: Request,
+    @Body() data: CreateExportTaskDto,
+  ) {
+    // 从 reqRequest.user 获取用户信息（类型已通过 express.d.ts 扩展定义）
+    const tenantId = reqRequest.user!.tenantId;
+
+    return this.reportExportService.createExportTask(data, tenantId);
   }
 
   /**
@@ -35,8 +42,12 @@ export class ReportExportController {
    * @query assetId - 可选，按资产ID筛选
    */
   @Get()
-  async getExportTasks(@Query('assetId') assetId?: string) {
-    const tasks = await this.reportExportService.findAll(assetId);
+  async getExportTasks(
+    @Req() reqRequest: Request,
+    @Query('assetId') assetId: string | undefined,
+  ) {
+    const tenantId = reqRequest.user!.tenantId;
+    const tasks = await this.reportExportService.findAll(tenantId, assetId);
     return {
       tasks,
       total: tasks.length,
@@ -48,8 +59,9 @@ export class ReportExportController {
    * @route GET /api/report-export/queue/status
    */
   @Get('queue/status')
-  async getQueueStatus() {
-    return this.reportExportService.getQueueStatus();
+  async getQueueStatus(@Req() reqRequest: Request) {
+    const tenantId = reqRequest.user!.tenantId;
+    return this.reportExportService.getQueueStatus(tenantId);
   }
 
   /**
@@ -57,8 +69,12 @@ export class ReportExportController {
    * @route GET /api/report-export/:id
    */
   @Get(':id')
-  async getTask(@Param('id') id: string) {
-    return this.reportExportService.findOne(id);
+  async getTask(
+    @Req() reqRequest: Request,
+    @Param('id') id: string,
+  ) {
+    const tenantId = reqRequest.user!.tenantId;
+    return this.reportExportService.findOne(id, tenantId);
   }
 
   /**
@@ -66,9 +82,14 @@ export class ReportExportController {
    * @route GET /api/report-export/download/:id
    */
   @Get('download/:id')
-  async downloadFile(@Param('id') id: string, @Res() res: Response) {
+  async downloadFile(
+    @Req() reqRequest: Request,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
     try {
-      const filePath = await this.reportExportService.getTaskFilePath(id);
+      const tenantId = reqRequest.user!.tenantId;
+      const filePath = await this.reportExportService.getTaskFilePath(id, tenantId);
       
       if (!existsSync(filePath)) {
         return res.status(HttpStatus.NOT_FOUND).json({

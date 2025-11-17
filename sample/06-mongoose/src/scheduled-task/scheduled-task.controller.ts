@@ -1,4 +1,5 @@
-import { Get, Put, Body, Controller } from '@nestjs/common';
+import { Get, Put, Body, Controller, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { ScheduledTaskService } from './scheduled-task.service';
 import { CreateScheduledTaskDto } from './dto';
 import { ScheduledTask } from './scheduled-task.interface';
@@ -22,8 +23,11 @@ export class ScheduledTaskController {
    * @returns {Promise<{tasks: ScheduledTask[], tasksCount: number}>} 返回任务列表和总数
    */
   @Get()
-  async findAll(): Promise<{ tasks: ScheduledTask[]; tasksCount: number }> {
-    const tasks = await this.scheduledTaskService.findAll();
+  async findAll(@Req() reqRequest: Request): Promise<{ tasks: ScheduledTask[]; tasksCount: number }> {
+    // 从 reqRequest.user 获取用户信息（类型已通过 express.d.ts 扩展定义）
+    const tenantId = reqRequest.user!.tenantId;
+
+    const tasks = await this.scheduledTaskService.findAll(tenantId);
     return {
       tasks,
       tasksCount: tasks.length,
@@ -36,11 +40,17 @@ export class ScheduledTaskController {
    * enable: false 时，只需要传 enable 字段，其他字段可选
    * enable: true 时，frequency、time、recipient、pageIds、branchIds 都是必填字段
    * @route PUT /scheduled-tasks
-   * @param {CreateScheduledTaskDto} taskData - 定时任务数据（不需要传入 id）
+   * @param {CreateScheduledTaskDto} data - 定时任务数据（不需要传入 id）
    * @returns {Promise<ScheduledTask>} 返回创建或更新后的任务对象
    */
   @Put()
-  async createOrUpdate(@Body() taskData: CreateScheduledTaskDto): Promise<ScheduledTask> {
-    return await this.scheduledTaskService.createOrUpdate(taskData);
+  async createOrUpdate(
+    @Req() reqRequest: Request,
+    @Body() data: CreateScheduledTaskDto,
+  ): Promise<ScheduledTask> {
+    // 从 reqRequest.user 获取用户信息（类型已通过 express.d.ts 扩展定义）
+    const tenantId = reqRequest.user!.tenantId;
+
+    return await this.scheduledTaskService.createOrUpdate(data, tenantId);
   }
 }

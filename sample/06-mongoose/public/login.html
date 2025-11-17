@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户登录 - 报表导出系统</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 28px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            width: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 14px;
+        }
+        .success {
+            color: #155724;
+            background-color: #d4edda;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 14px;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .register-link {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+        .register-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .register-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>🔐 用户登录</h1>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">用户名</label>
+                <input type="text" id="username" required autocomplete="username" placeholder="请输入用户名">
+            </div>
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" required autocomplete="current-password" placeholder="请输入密码">
+            </div>
+            <button type="submit" id="loginBtn">登录</button>
+        </form>
+        <div id="loginMessage"></div>
+        <div class="register-link">
+            还没有账号？<a href="/register">立即注册</a>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const AUTH_API = `${API_BASE}/auth`;
+
+        // 登录表单提交
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const loginBtn = document.getElementById('loginBtn');
+            const loginMessage = document.getElementById('loginMessage');
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            loginBtn.disabled = true;
+            loginBtn.innerHTML = '登录中... <span class="loading"></span>';
+            loginMessage.innerHTML = '';
+            
+            try {
+                const response = await fetch(`${AUTH_API}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '登录失败');
+                }
+                
+                const result = await response.json();
+                
+                loginMessage.innerHTML = `
+                    <div class="success">
+                        ✅ 登录成功！正在跳转...
+                    </div>
+                `;
+                
+                // 延迟跳转到主页
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1000);
+                
+            } catch (error) {
+                loginMessage.innerHTML = `
+                    <div class="error">
+                        ❌ 错误: ${error.message}
+                    </div>
+                `;
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.innerHTML = '登录';
+            }
+        });
+    </script>
+</body>
+</html>
+

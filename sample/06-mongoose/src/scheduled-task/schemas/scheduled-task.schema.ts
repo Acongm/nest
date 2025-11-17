@@ -34,6 +34,10 @@ export class ScheduledTask {
   @Prop({ required: true, unique: true, type: String })
   id: string;
 
+  /** 租户ID */
+  @Prop({ required: true, type: String, index: true })
+  tenantId: string;
+
   /** 是否启用 */
   @Prop({ required: true, type: Boolean, default: false })
   enable: boolean;
@@ -77,6 +81,7 @@ export class ScheduledTask {
 export const ScheduledTaskSchema = SchemaFactory.createForClass(ScheduledTask);
 
 // 添加索引
-ScheduledTaskSchema.index({ id: 1 }, { unique: true, sparse: false });
+ScheduledTaskSchema.index({ id: 1, tenantId: 1 }, { unique: true, sparse: false });
+ScheduledTaskSchema.index({ tenantId: 1, enable: 1 });
 ScheduledTaskSchema.index({ enable: 1 }, { sparse: false });
 

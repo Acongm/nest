@@ -14,19 +14,21 @@ export class TaskUpdater {
    * 更新任务的启用状态为禁用
    * @param {Model<ScheduledTaskDocument>} taskModel - Mongoose Model
    * @param {string} taskId - 任务ID
+   * @param {string} tenantId - 租户ID
    * @returns {Promise<ScheduledTask>} 返回更新后的任务对象
    */
   static async disableTask(
     taskModel: Model<ScheduledTaskDocument>,
-    taskId: string
+    taskId: string,
+    tenantId: string,
   ): Promise<ScheduledTask> {
-    const existingTask = await taskModel.findOne({ id: taskId }).exec();
+    const existingTask = await taskModel.findOne({ id: taskId, tenantId }).exec();
 
     if (existingTask) {
       // 使用 findOneAndUpdate 更新 enable 字段
       const updatedTask = await taskModel
         .findOneAndUpdate(
-          { id: taskId },
+          { id: taskId, tenantId },
           {
             $set: {
               enable: false,
@@ -46,6 +48,7 @@ export class TaskUpdater {
       // 如果任务不存在，创建一个禁用的任务（使用默认值）
       const newTask = new taskModel({
         id: taskId,
+        tenantId,
         enable: false,
         frequency: FrequencyEnum.DAILY,
         time: { time: '00:00' },
@@ -65,23 +68,25 @@ export class TaskUpdater {
    * @param {Model<ScheduledTaskDocument>} taskModel - Mongoose Model
    * @param {string} taskId - 任务ID
    * @param {CreateScheduledTaskDto} taskData - 定时任务数据
+   * @param {string} tenantId - 租户ID
    * @returns {Promise<ScheduledTask>} 返回创建或更新后的任务对象
    */
   static async enableOrUpdateTask(
     taskModel: Model<ScheduledTaskDocument>,
     taskId: string,
-    taskData: CreateScheduledTaskDto
+    taskData: CreateScheduledTaskDto,
+    tenantId: string,
   ): Promise<ScheduledTask> {
     // 生成 cron 表达式
     const cronExpression = CronGenerator.generate(taskData.frequency!, taskData.time!);
 
-    const existingTask = await taskModel.findOne({ id: taskId }).exec();
+    const existingTask = await taskModel.findOne({ id: taskId, tenantId }).exec();
 
     if (existingTask) {
       // 使用 findOneAndUpdate 更新现有任务
       const updatedTask = await taskModel
         .findOneAndUpdate(
-          { id: taskId },
+          { id: taskId, tenantId },
           {
             $set: {
               enable: true,
@@ -107,6 +112,7 @@ export class TaskUpdater {
       // 创建新任务
       const newTask = new taskModel({
         id: taskId,
+        tenantId,
         enable: true,
         frequency: taskData.frequency!,
         time: taskData.time!,

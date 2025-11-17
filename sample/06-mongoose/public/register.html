@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户注册 - 报表导出系统</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .register-container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 28px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        label .required {
+            color: #dc3545;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        button {
+            width: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 14px;
+        }
+        .success {
+            color: #155724;
+            background-color: #d4edda;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 14px;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .login-link {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+        .login-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .login-link a:hover {
+            text-decoration: underline;
+        }
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="register-container">
+        <h1>📝 用户注册</h1>
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="username">用户名 <span class="required">*</span></label>
+                <input type="text" id="username" required autocomplete="username" placeholder="请输入用户名">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">密码 <span class="required">*</span></label>
+                <input type="password" id="password" required autocomplete="new-password" placeholder="至少6位字符" minlength="6">
+                <div class="help-text">密码长度至少6位</div>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="userId">用户ID <span class="required">*</span></label>
+                    <input type="text" id="userId" required placeholder="例如: user001">
+                </div>
+                
+                <div class="form-group">
+                    <label for="tenantId">租户ID <span class="required">*</span></label>
+                    <input type="text" id="tenantId" required placeholder="例如: tenant001">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="companyId">公司ID <span class="required">*</span></label>
+                <input type="text" id="companyId" required placeholder="例如: company001">
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="email">邮箱（可选）</label>
+                    <input type="email" id="email" autocomplete="email" placeholder="example@email.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="phone">手机号（可选）</label>
+                    <input type="tel" id="phone" autocomplete="tel" placeholder="13800138000">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="realName">真实姓名（可选）</label>
+                <input type="text" id="realName" placeholder="请输入真实姓名">
+            </div>
+            
+            <button type="submit" id="registerBtn">注册</button>
+        </form>
+        <div id="registerMessage"></div>
+        <div class="login-link">
+            已有账号？<a href="/login">立即登录</a>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const AUTH_API = `${API_BASE}/auth`;
+
+        // 注册表单提交
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const registerBtn = document.getElementById('registerBtn');
+            const registerMessage = document.getElementById('registerMessage');
+            
+            const formData = {
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+                userId: document.getElementById('userId').value,
+                tenantId: document.getElementById('tenantId').value,
+                companyId: document.getElementById('companyId').value,
+            };
+            
+            // 可选字段
+            const email = document.getElementById('email').value;
+            const phone = document.getElementById('phone').value;
+            const realName = document.getElementById('realName').value;
+            
+            if (email) formData.email = email;
+            if (phone) formData.phone = phone;
+            if (realName) formData.realName = realName;
+            
+            registerBtn.disabled = true;
+            registerBtn.innerHTML = '注册中... <span class="loading"></span>';
+            registerMessage.innerHTML = '';
+            
+            try {
+                const response = await fetch(`${AUTH_API}/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify(formData),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '注册失败');
+                }
+                
+                const result = await response.json();
+                
+                registerMessage.innerHTML = `
+                    <div class="success">
+                        ✅ ${result.message || '注册成功！'} 正在跳转到登录页...
+                    </div>
+                `;
+                
+                // 延迟跳转到登录页
+                setTimeout(() => {
+                    window.location.href = '/login';
+                }, 2000);
+                
+            } catch (error) {
+                registerMessage.innerHTML = `
+                    <div class="error">
+                        ❌ 错误: ${error.message}
+                    </div>
+                `;
+            } finally {
+                registerBtn.disabled = false;
+                registerBtn.innerHTML = '注册';
+            }
+        });
+    </script>
+</body>
+</html>
+

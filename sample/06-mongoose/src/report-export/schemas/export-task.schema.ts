@@ -28,6 +28,10 @@ export class ExportTask extends Document {
   @Prop({ type: Date, required: true })
   endTime: Date;
 
+  /** 租户ID */
+  @Prop({ type: String, required: true, index: true })
+  tenantId: string;
+
   /** 资产ID */
   @Prop({ type: String, required: true, index: true })
   assetId: string;
@@ -69,6 +73,7 @@ export class ExportTask extends Document {
 export const ExportTaskSchema = SchemaFactory.createForClass(ExportTask);
 
 // 创建索引
-ExportTaskSchema.index({ assetId: 1, createdAt: -1 });
+ExportTaskSchema.index({ tenantId: 1, createdAt: -1 });
+ExportTaskSchema.index({ tenantId: 1, assetId: 1, createdAt: -1 });
 ExportTaskSchema.index({ status: 1, createdAt: -1 });
 

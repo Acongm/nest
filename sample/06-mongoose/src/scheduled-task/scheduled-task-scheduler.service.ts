@@ -67,7 +67,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
    * @param task 定时任务
    */
   scheduleTask(task: ScheduledTask): void {
-    const jobName = `scheduled-task-${task.id}`;
+    const jobName = `scheduled-task-${task.id}-${task.tenantId}`;
 
     // 如果任务已存在，先删除
     if (this.schedulerRegistry.doesExist('cron', jobName)) {
@@ -105,9 +105,10 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   /**
    * 取消调度单个定时任务
    * @param taskId 任务ID
+   * @param tenantId 租户ID
    */
-  unscheduleTask(taskId: string): void {
-    const jobName = `scheduled-task-${taskId}`;
+  unscheduleTask(taskId: string, tenantId: string): void {
+    const jobName = `scheduled-task-${taskId}-${tenantId}`;
 
     if (this.schedulerRegistry.doesExist('cron', jobName)) {
       this.schedulerRegistry.deleteCronJob(jobName);
@@ -118,13 +119,14 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   /**
    * 重新调度任务（用于更新任务时）
    * @param taskId 任务ID
+   * @param tenantId 租户ID
    */
-  async rescheduleTask(taskId: string): Promise<void> {
+  async rescheduleTask(taskId: string, tenantId: string): Promise<void> {
     // 先取消现有任务
-    this.unscheduleTask(taskId);
+    this.unscheduleTask(taskId, tenantId);
 
     // 重新加载任务并调度
-    const task = await this.taskModel.findOne({ id: taskId }).exec();
+    const task = await this.taskModel.findOne({ id: taskId, tenantId }).exec();
     if (task && task.enable) {
       this.scheduleTask(task);
     }
@@ -154,14 +156,17 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
           // 构建报表页面URL
           const reportPage = this.buildReportPageUrl(pageId, branchId);
 
-          // 创建导出任务
-          const exportTask = this.reportExportService.createExportTask({
-            startTime: startTime.toISOString(),
-            endTime: endTime.toISOString(),
-            assetId: branchId, // 使用 branchId 作为 assetId
-            reportPage,
-            taskName: `定时任务-${task.id}`,
-          });
+          // 创建导出任务（使用定时任务的 tenantId）
+          const exportTask = this.reportExportService.createExportTask(
+            {
+              startTime: startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              assetId: branchId, // 使用 branchId 作为 assetId
+              reportPage,
+              taskName: `定时任务-${task.id}`,
+            },
+            task.tenantId,
+          );
 
           exportTasks.push({
             exportTask,
@@ -184,9 +189,10 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
           const exportTask = result.value;
           const { pageId, branchId } = exportTasks[i];
 
-          // 等待任务完成
+          // 等待任务完成（使用定时任务的 tenantId）
           const completedTask = await this.waitForTaskCompletion(
             exportTask._id.toString(),
+            task.tenantId,
           );
 
           if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
@@ -286,10 +292,12 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   /**
    * 等待任务完成
    * @param taskId 任务ID
+   * @param tenantId 租户ID
    * @param maxWaitTime 最大等待时间（毫秒），默认10分钟
    */
   private async waitForTaskCompletion(
     taskId: string,
+    tenantId: string,
     maxWaitTime: number = 10 * 60 * 1000,
   ): Promise<any> {
     const startTime = Date.now();
@@ -297,7 +305,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
 
     while (Date.now() - startTime < maxWaitTime) {
       try {
-        const task = await this.reportExportService.findOne(taskId);
+        const task = await this.reportExportService.findOne(taskId, tenantId);
 
         if (task.status === ExportTaskStatus.COMPLETED || task.status === ExportTaskStatus.FAILED) {
           return task;
@@ -326,6 +334,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
     jobs.forEach((job, name) => {
       if (name.startsWith('scheduled-task-')) {
         this.schedulerRegistry.deleteCronJob(name);
+        logger.info('清理定时任务', { jobName: name });
       }
     });
   }

@@ -3,7 +3,7 @@ version: "3"
 services:
   mongodb:
     image: mongo:latest
-    container_name: nestjs-mongodb
+    container_name: nestjs-mongodb-dev
     restart: unless-stopped
     environment:
       - MONGO_INITDB_DATABASE=test
@@ -11,25 +11,25 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-    # 注意：MongoDB 6.0+ 默认启用认证
-    # 开发环境禁用认证
     command: ["--noauth"]
 
   app:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: nestjs-app
+      dockerfile: Dockerfile.dev
+    container_name: nestjs-app-dev
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - MONGODB_URI=mongodb://mongodb:27017/test
       - JWT_SECRET=your-secret-key-change-in-production
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
     volumes:
+      - .:/app
+      - /app/node_modules
       - ./public/uploads:/app/public/uploads
       - ./logs:/app/logs
     depends_on:
@@ -43,3 +43,4 @@ volumes:
 networks:
   nestjs-network:
     driver: bridge
+

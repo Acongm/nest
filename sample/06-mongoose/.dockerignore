@@ -1,0 +1,43 @@
+# 依赖
+node_modules
+npm-debug.log
+yarn-error.log
+
+# 构建输出
+dist
+build
+
+# 日志
+logs
+*.log
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# 测试
+coverage
+.nyc_output
+
+# 其他
+.DS_Store
+*.pem
+public/uploads
+

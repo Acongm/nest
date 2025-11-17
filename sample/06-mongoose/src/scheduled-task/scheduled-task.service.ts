@@ -34,13 +34,14 @@ export class ScheduledTaskService {
   ) {}
 
   /**
-   * 获取所有定时任务列表
+   * 获取所有定时任务列表（按租户ID）
    * 按创建时间倒序排列
+   * @param tenantId 租户ID
    * @returns {Promise<ScheduledTask[]>} 返回所有定时任务数组
    */
-  async findAll(): Promise<ScheduledTask[]> {
+  async findAll(tenantId: string): Promise<ScheduledTask[]> {
     return await this.taskModel
-      .find()
+      .find({ tenantId })
       .sort({ created: -1 })
       .exec();
   }
@@ -51,26 +52,27 @@ export class ScheduledTaskService {
    * 当 enable: false 时，只更新 enable 字段，其他字段保持不变
    * 当 enable: true 时，cronExpression 会根据 frequency 和 time 自动生成
    * @param {CreateScheduledTaskDto} taskData - 定时任务数据
+   * @param tenantId 租户ID
    * @returns {Promise<ScheduledTask>} 返回创建或更新后的任务对象
    */
-  async createOrUpdate(taskData: CreateScheduledTaskDto): Promise<ScheduledTask> {
+  async createOrUpdate(taskData: CreateScheduledTaskDto, tenantId: string): Promise<ScheduledTask> {
     const taskId = this.SYSTEM_TASK_ID;
 
     let updatedTask: ScheduledTask;
 
     // 如果是关闭操作（enable: false），只更新 enable 字段
     if (!taskData.enable) {
-      updatedTask = await TaskUpdater.disableTask(this.taskModel, taskId);
+      updatedTask = await TaskUpdater.disableTask(this.taskModel, taskId, tenantId);
       // 取消调度
-      this.schedulerService.unscheduleTask(taskId);
+      this.schedulerService.unscheduleTask(taskId, tenantId);
     } else {
       // enable: true 时，验证必填字段
       TaskValidator.validateEnableTask(taskData);
 
-      // 启用或更新任务
-      updatedTask = await TaskUpdater.enableOrUpdateTask(this.taskModel, taskId, taskData);
+      // 启用或更新任务（包含 tenantId）
+      updatedTask = await TaskUpdater.enableOrUpdateTask(this.taskModel, taskId, taskData, tenantId);
       // 重新调度任务
-      await this.schedulerService.rescheduleTask(taskId);
+      await this.schedulerService.rescheduleTask(taskId, tenantId);
     }
 
     return updatedTask;

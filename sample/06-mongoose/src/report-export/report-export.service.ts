@@ -55,16 +55,17 @@ export class ReportExportService {
   /**
    * 创建导出任务
    */
-  async createExportTask(createDto: CreateExportTaskDto): Promise<ExportTask> {
+  async createExportTask(createDto: CreateExportTaskDto, tenantId: string): Promise<ExportTask> {
     // 1. 验证参数
     this.validateParams(createDto);
 
-    // 2. 检查当日导出次数
-    await this.checkDailyExportLimit(createDto.assetId);
+    // 2. 检查当日导出次数（按租户和资产ID）
+    await this.checkDailyExportLimit(createDto.assetId, tenantId);
 
     // 3. 创建任务记录（状态：待处理）
     const task = new this.exportTaskModel({
       ...createDto,
+      tenantId, // 添加租户ID
       startTime: new Date(createDto.startTime),
       endTime: new Date(createDto.endTime),
       status: ExportTaskStatus.PENDING,
@@ -111,15 +112,16 @@ export class ReportExportService {
   }
 
   /**
-   * 检查当日导出次数限制
+   * 检查当日导出次数限制（按租户和资产ID）
    */
-  private async checkDailyExportLimit(assetId: string): Promise<void> {
+  private async checkDailyExportLimit(assetId: string, tenantId: string): Promise<void> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     const todayExports = await this.exportTaskModel.countDocuments({
+      tenantId,
       assetId,
       createdAt: {
         $gte: today,
@@ -382,27 +384,30 @@ export class ReportExportService {
   /**
    * 获取所有导出任务列表
    */
-  async findAll(assetId?: string): Promise<ExportTask[]> {
-    const query = assetId ? { assetId } : {};
+  async findAll(tenantId: string, assetId?: string): Promise<ExportTask[]> {
+    const query: any = { tenantId }; // 按租户ID过滤
+    if (assetId) {
+      query.assetId = assetId;
+    }
     return this.exportTaskModel.find(query).sort({ createdAt: -1 }).exec();
   }
 
   /**
-   * 根据ID获取任务
+   * 根据ID获取任务（验证租户ID）
    */
-  async findOne(taskId: string): Promise<ExportTask> {
-    const task = await this.exportTaskModel.findById(taskId).exec();
+  async findOne(taskId: string, tenantId: string): Promise<ExportTask> {
+    const task = await this.exportTaskModel.findOne({ _id: taskId, tenantId }).exec();
     if (!task) {
-      throw new HttpException('任务不存在', HttpStatus.NOT_FOUND);
+      throw new HttpException('任务不存在或无权限访问', HttpStatus.NOT_FOUND);
     }
     return task;
   }
 
   /**
-   * 获取任务文件路径
+   * 获取任务文件路径（验证租户ID）
    */
-  async getTaskFilePath(taskId: string): Promise<string> {
-    const task = await this.findOne(taskId);
+  async getTaskFilePath(taskId: string, tenantId: string): Promise<string> {
+    const task = await this.findOne(taskId, tenantId);
     if (task.status !== ExportTaskStatus.COMPLETED || !task.filePath) {
       throw new HttpException('文件不存在或任务未完成', HttpStatus.NOT_FOUND);
     }
@@ -410,9 +415,9 @@ export class ReportExportService {
   }
 
   /**
-   * 获取队列状态信息
+   * 获取队列状态信息（按租户ID）
    */
-  async getQueueStatus(): Promise<{
+  async getQueueStatus(tenantId: string): Promise<{
     maxConcurrent: number;
     pending: number;
     processing: number;
@@ -420,14 +425,16 @@ export class ReportExportService {
     failed: number;
   }> {
     const [pending, processing, completed, failed] = await Promise.all([
-      this.exportTaskModel.countDocuments({ status: ExportTaskStatus.PENDING }),
+      this.exportTaskModel.countDocuments({ tenantId, status: ExportTaskStatus.PENDING }),
       this.exportTaskModel.countDocuments({
+        tenantId,
         status: ExportTaskStatus.PROCESSING,
       }),
       this.exportTaskModel.countDocuments({
+        tenantId,
         status: ExportTaskStatus.COMPLETED,
       }),
-      this.exportTaskModel.countDocuments({ status: ExportTaskStatus.FAILED }),
+      this.exportTaskModel.countDocuments({ tenantId, status: ExportTaskStatus.FAILED }),
     ]);
 
     return {

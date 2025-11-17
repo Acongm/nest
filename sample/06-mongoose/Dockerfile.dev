@@ -1,0 +1,41 @@
+# 开发环境 Dockerfile
+# 使用官方 Node.js 镜像
+FROM node:20-alpine
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装 Chromium 和必要的依赖（Alpine Linux）
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    && rm -rf /var/cache/apk/*
+
+# 设置环境变量，跳过 Puppeteer 的 Chromium 下载
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# 设置 npm 镜像源（可选，如果需要加速 npm 安装）
+# 取消下面的注释以使用国内镜像源
+# RUN npm config set registry https://registry.npmmirror.com
+
+# 复制 package.json 和 package-lock.json（如果存在）
+COPY package*.json ./
+
+# 安装所有依赖（包括 devDependencies）
+RUN npm install --ignore-scripts
+
+# 复制源代码
+COPY . .
+
+# 暴露端口
+EXPOSE 3000
+
+# 开发模式启动（使用 nodemon 或 watch 模式）
+CMD ["npm", "run", "start:dev"]
+

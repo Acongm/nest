@@ -16,7 +16,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "echo 'No e2e tests implemented yet.'"
+    "test:e2e": "echo 'No e2e tests implemented yet.'",
+    "install:fast": "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install",
+    "postinstall": "echo '提示: 如果 Puppeteer 下载慢，请运行 npm run install:fast 或查看 docs/puppeteer-speedup-guide.md'"
   },
   "dependencies": {
     "@nestjs/bull": "^11.0.4",
@@ -59,7 +61,6 @@
     "@types/jest": "30.0.0",
     "@types/node": "24.10.1",
     "@types/supertest": "6.0.3",
-    "@types/uuid": "^11.0.0",
     "eslint": "9.39.1",
     "eslint-plugin-prettier": "5.5.4",
     "globals": "16.5.0",
