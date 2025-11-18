@@ -77,4 +77,14 @@ export class ScheduledTaskService {
 
     return updatedTask;
   }
+
+  /**
+   * 获取任务运行状态
+   * @param taskId 任务ID
+   * @param tenantId 租户ID
+   * @returns 任务运行状态
+   */
+  getTaskStatus(taskId: string, tenantId: string): { isRunning: boolean; nextExecution?: Date } {
+    return this.schedulerService.getTaskStatus(taskId, tenantId);
+  }
 }

@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>定时任务管理 - 报表导出系统</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        h2 {
+            color: #555;
+            border-bottom: 2px solid #1976d2;
+            padding-bottom: 10px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .user-info span {
+            color: #666;
+        }
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .nav-link {
+            padding: 8px 16px;
+            background-color: #1976d2;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .nav-link:hover {
+            background-color: #1565c0;
+        }
+        .logout-btn {
+            background-color: #dc3545;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .logout-btn:hover:not(:disabled) {
+            background-color: #c82333;
+        }
+        button {
+            background-color: #1976d2;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background-color 0.3s;
+        }
+        button:hover:not(:disabled) {
+            background-color: #1565c0;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #1976d2;
+            box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+        .array-input-group {
+            margin-bottom: 10px;
+        }
+        .array-input-item {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .array-input-item input {
+            flex: 1;
+        }
+        .array-input-item button {
+            background-color: #dc3545;
+            padding: 8px 16px;
+        }
+        .add-item-btn {
+            background-color: #28a745;
+            margin-bottom: 15px;
+        }
+        .add-item-btn:hover:not(:disabled) {
+            background-color: #218838;
+        }
+        .task-list {
+            margin-top: 20px;
+        }
+        .task-item {
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            background-color: #f9f9f9;
+        }
+        .task-item.enabled {
+            border-left: 4px solid #28a745;
+        }
+        .task-item.disabled {
+            border-left: 4px solid #dc3545;
+        }
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .task-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+        .task-status {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.enabled {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-badge.disabled {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status-badge.running {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+        .task-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .task-info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .task-info-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .task-info-value {
+            font-size: 14px;
+            color: #333;
+            font-weight: 500;
+        }
+        .task-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .edit-btn {
+            background-color: #ffc107;
+            color: #333;
+        }
+        .edit-btn:hover:not(:disabled) {
+            background-color: #e0a800;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            color: #155724;
+            background-color: #d4edda;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #1976d2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⏰ 定时任务管理</h1>
+            <div class="user-info">
+                <span>欢迎，<strong id="currentUsername"></strong></span>
+                <button class="logout-btn" onclick="handleLogout()">登出</button>
+            </div>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">报表导出</a>
+            <a href="/scheduled-tasks" class="nav-link">定时任务</a>
+            <a href="/task-execution-records" class="nav-link">执行记录</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>创建/编辑定时任务</h2>
+        <form id="taskForm">
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="enable" onchange="toggleFormFields()">
+                    <label for="enable">启用定时任务</label>
+                </div>
+            </div>
+
+            <div id="taskFields" class="hidden">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="frequency">执行频率 *</label>
+                        <select id="frequency" required onchange="updateTimeFields()">
+                            <option value="">请选择</option>
+                            <option value="daily">每天</option>
+                            <option value="weekly">每周</option>
+                            <option value="monthly">每月</option>
+                            <option value="test">测试（每分钟）</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="time">执行时间 * (格式: HH:mm)</label>
+                        <input type="time" id="time" required>
+                    </div>
+                </div>
+
+                <div class="form-group" id="weekField" style="display: none;">
+                    <label for="week">星期 *</label>
+                    <select id="week">
+                        <option value="">请选择</option>
+                        <option value="Mon">星期一</option>
+                        <option value="Tue">星期二</option>
+                        <option value="Wed">星期三</option>
+                        <option value="Thu">星期四</option>
+                        <option value="Fri">星期五</option>
+                        <option value="Sat">星期六</option>
+                        <option value="Sun">星期日</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="dayField" style="display: none;">
+                    <label for="day">日期 * (1-31)</label>
+                    <input type="number" id="day" min="1" max="31">
+                </div>
+
+                <div class="form-group">
+                    <label>接收人邮箱 *</label>
+                    <div id="recipientList"></div>
+                    <button type="button" class="add-item-btn" onclick="addRecipient()">+ 添加邮箱</button>
+                </div>
+
+                <div class="form-group">
+                    <label>页面ID列表 *</label>
+                    <div id="pageIdsList"></div>
+                    <button type="button" class="add-item-btn" onclick="addPageId()">+ 添加页面ID</button>
+                </div>
+
+                <div class="form-group">
+                    <label>分支ID列表 *</label>
+                    <div id="branchIdsList"></div>
+                    <button type="button" class="add-item-btn" onclick="addBranchId()">+ 添加分支ID</button>
+                </div>
+            </div>
+
+            <button type="submit" id="submitBtn">保存任务</button>
+        </form>
+        
+        <div id="statusMessage"></div>
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h2>任务列表</h2>
+            <button onclick="loadTaskList()">刷新列表</button>
+        </div>
+        <div id="taskList" class="task-list">
+            <p style="color: #666;">加载中...</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const AUTH_API = `${API_BASE}/auth`;
+        const TASK_API = `${API_BASE}/scheduled-tasks`;
+        let currentUser = null;
+        let currentTask = null;
+        let statusPollingInterval = null;
+
+        // 检查登录状态
+        async function checkAuth() {
+            try {
+                const response = await fetch(`${AUTH_API}/me`, {
+                    credentials: 'include',
+                });
+                
+                if (response.ok) {
+                    currentUser = await response.json();
+                    document.getElementById('currentUsername').textContent = currentUser.username;
+                    loadTaskList();
+                } else {
+                    window.location.href = '/login';
+                }
+            } catch (error) {
+                console.error('检查认证状态失败:', error);
+                window.location.href = '/login';
+            }
+        }
+
+        // 登出
+        async function handleLogout() {
+            try {
+                await fetch(`${AUTH_API}/logout`, {
+                    method: 'POST',
+                    credentials: 'include',
+                });
+                if (statusPollingInterval) {
+                    clearInterval(statusPollingInterval);
+                }
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('登出失败:', error);
+            }
+        }
+
+        // 切换表单字段显示
+        function toggleFormFields() {
+            const enable = document.getElementById('enable').checked;
+            const taskFields = document.getElementById('taskFields');
+            if (enable) {
+                taskFields.classList.remove('hidden');
+            } else {
+                taskFields.classList.add('hidden');
+            }
+        }
+
+        // 更新时间字段显示
+        function updateTimeFields() {
+            const frequency = document.getElementById('frequency').value;
+            const weekField = document.getElementById('weekField');
+            const dayField = document.getElementById('dayField');
+            
+            weekField.style.display = frequency === 'weekly' ? 'block' : 'none';
+            dayField.style.display = frequency === 'monthly' ? 'block' : 'none';
+            
+            if (frequency === 'weekly') {
+                document.getElementById('week').required = true;
+                document.getElementById('day').required = false;
+            } else if (frequency === 'monthly') {
+                document.getElementById('week').required = false;
+                document.getElementById('day').required = true;
+            } else {
+                document.getElementById('week').required = false;
+                document.getElementById('day').required = false;
+            }
+        }
+
+        // 添加接收人邮箱
+        function addRecipient(value = '') {
+            const list = document.getElementById('recipientList');
+            const div = document.createElement('div');
+            div.className = 'array-input-item';
+            div.innerHTML = `
+                <input type="email" placeholder="example@email.com" value="${value}" required>
+                <button type="button" onclick="this.parentElement.remove()">删除</button>
+            `;
+            list.appendChild(div);
+        }
+
+        // 添加页面ID
+        function addPageId(value = '') {
+            const list = document.getElementById('pageIdsList');
+            const div = document.createElement('div');
+            div.className = 'array-input-item';
+            div.innerHTML = `
+                <input type="text" placeholder="页面ID" value="${value}" required>
+                <button type="button" onclick="this.parentElement.remove()">删除</button>
+            `;
+            list.appendChild(div);
+        }
+
+        // 添加分支ID
+        function addBranchId(value = '') {
+            const list = document.getElementById('branchIdsList');
+            const div = document.createElement('div');
+            div.className = 'array-input-item';
+            div.innerHTML = `
+                <input type="text" placeholder="分支ID" value="${value}" required>
+                <button type="button" onclick="this.parentElement.remove()">删除</button>
+            `;
+            list.appendChild(div);
+        }
+
+        // 表单提交
+        document.getElementById('taskForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const statusMessage = document.getElementById('statusMessage');
+            
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '保存中... <span class="loading"></span>';
+            statusMessage.innerHTML = '';
+            
+            try {
+                const enable = document.getElementById('enable').checked;
+                const formData = { enable };
+
+                if (enable) {
+                    const frequency = document.getElementById('frequency').value;
+                    const timeValue = document.getElementById('time').value;
+                    const time = {
+                        time: timeValue
+                    };
+
+                    if (frequency === 'weekly') {
+                        time.week = document.getElementById('week').value;
+                    } else if (frequency === 'monthly') {
+                        time.day = parseInt(document.getElementById('day').value);
+                    }
+
+                    formData.frequency = frequency;
+                    formData.time = time;
+
+                    // 收集数组字段
+                    const recipientInputs = document.querySelectorAll('#recipientList input');
+                    formData.recipient = Array.from(recipientInputs).map(input => input.value.trim()).filter(v => v);
+
+                    const pageIdInputs = document.querySelectorAll('#pageIdsList input');
+                    formData.pageIds = Array.from(pageIdInputs).map(input => input.value.trim()).filter(v => v);
+
+                    const branchIdInputs = document.querySelectorAll('#branchIdsList input');
+                    formData.branchIds = Array.from(branchIdInputs).map(input => input.value.trim()).filter(v => v);
+                }
+                
+                const response = await fetch(TASK_API, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify(formData),
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = '/login';
+                        throw new Error('登录已过期，请重新登录');
+                    }
+                    const error = await response.json();
+                    throw new Error(error.message || '保存任务失败');
+                }
+                
+                const task = await response.json();
+                
+                statusMessage.innerHTML = `
+                    <div class="success">
+                        ✅ 任务保存成功！
+                    </div>
+                `;
+                
+                // 刷新任务列表
+                setTimeout(() => {
+                    loadTaskList();
+                    resetForm();
+                }, 1000);
+                
+            } catch (error) {
+                statusMessage.innerHTML = `
+                    <div class="error">
+                        ❌ 错误: ${error.message}
+                    </div>
+                `;
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '保存任务';
+            }
+        });
+
+        // 重置表单
+        function resetForm() {
+            document.getElementById('taskForm').reset();
+            document.getElementById('recipientList').innerHTML = '';
+            document.getElementById('pageIdsList').innerHTML = '';
+            document.getElementById('branchIdsList').innerHTML = '';
+            document.getElementById('taskFields').classList.add('hidden');
+            currentTask = null;
+        }
+
+        // 加载任务列表
+        async function loadTaskList() {
+            const taskList = document.getElementById('taskList');
+            taskList.innerHTML = '<p>加载中...</p>';
+            
+            try {
+                const response = await fetch(TASK_API, {
+                    credentials: 'include',
+                });
+                
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error('获取任务列表失败');
+                }
+                
+                const data = await response.json();
+                const tasks = data.tasks || [];
+                
+                if (tasks.length === 0) {
+                    taskList.innerHTML = '<p style="color: #666;">暂无任务</p>';
+                    return;
+                }
+                
+                taskList.innerHTML = tasks.map(task => createTaskItem(task)).join('');
+                
+                // 开始轮询任务状态
+                startStatusPolling(tasks);
+                
+            } catch (error) {
+                taskList.innerHTML = `<div class="error">错误: ${error.message}</div>`;
+            }
+        }
+
+        // 创建任务项HTML
+        function createTaskItem(task) {
+            const statusClass = task.enable ? 'enabled' : 'disabled';
+            const statusText = task.enable ? '已启用' : '已禁用';
+            const cronExpression = task.cronExpression || '未设置';
+            
+            const frequencyText = {
+                'daily': '每天',
+                'weekly': '每周',
+                'monthly': '每月',
+                'test': '测试（每分钟）'
+            }[task.frequency] || task.frequency;
+
+            const timeInfo = task.time ? 
+                `${task.time.time}${task.time.week ? ' (' + task.time.week + ')' : ''}${task.time.day ? ' (每月' + task.time.day + '日)' : ''}` : 
+                '未设置';
+
+            return `
+                <div class="task-item ${statusClass}" data-task-id="${task.id}">
+                    <div class="task-header">
+                        <div class="task-title">定时任务 #${task.id}</div>
+                        <div class="task-status">
+                            <span class="status-badge ${statusClass}" id="status-${task.id}">${statusText}</span>
+                            <span class="status-badge running" id="running-${task.id}" style="display: none;">运行中</span>
+                            <span id="next-exec-${task.id}" style="font-size: 12px; color: #666;"></span>
+                        </div>
+                    </div>
+                    <div class="task-info">
+                        <div class="task-info-item">
+                            <span class="task-info-label">执行频率</span>
+                            <span class="task-info-value">${frequencyText}</span>
+                        </div>
+                        <div class="task-info-item">
+                            <span class="task-info-label">执行时间</span>
+                            <span class="task-info-value">${timeInfo}</span>
+                        </div>
+                        <div class="task-info-item">
+                            <span class="task-info-label">Cron表达式</span>
+                            <span class="task-info-value" style="font-family: monospace; font-size: 12px;">${cronExpression}</span>
+                        </div>
+                        <div class="task-info-item">
+                            <span class="task-info-label">接收人</span>
+                            <span class="task-info-value">${task.recipient?.length || 0} 个邮箱</span>
+                        </div>
+                        <div class="task-info-item">
+                            <span class="task-info-label">页面ID</span>
+                            <span class="task-info-value">${task.pageIds?.length || 0} 个</span>
+                        </div>
+                        <div class="task-info-item">
+                            <span class="task-info-label">分支ID</span>
+                            <span class="task-info-value">${task.branchIds?.length || 0} 个</span>
+                        </div>
+                    </div>
+                    <div class="task-actions">
+                        <button class="edit-btn" onclick="editTask('${task.id}')">编辑</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 编辑任务
+        async function editTask(taskId) {
+            try {
+                const response = await fetch(TASK_API, {
+                    credentials: 'include',
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取任务详情失败');
+                }
+                
+                const data = await response.json();
+                const task = data.tasks?.find(t => t.id === taskId);
+                
+                if (!task) {
+                    throw new Error('任务不存在');
+                }
+                
+                currentTask = task;
+                
+                // 填充表单
+                document.getElementById('enable').checked = task.enable;
+                toggleFormFields();
+                
+                if (task.enable) {
+                    document.getElementById('frequency').value = task.frequency || '';
+                    updateTimeFields();
+                    
+                    if (task.time) {
+                        document.getElementById('time').value = task.time.time || '';
+                        if (task.time.week) {
+                            document.getElementById('week').value = task.time.week;
+                        }
+                        if (task.time.day) {
+                            document.getElementById('day').value = task.time.day;
+                        }
+                    }
+                    
+                    // 填充数组字段
+                    document.getElementById('recipientList').innerHTML = '';
+                    (task.recipient || []).forEach(email => addRecipient(email));
+                    
+                    document.getElementById('pageIdsList').innerHTML = '';
+                    (task.pageIds || []).forEach(id => addPageId(id));
+                    
+                    document.getElementById('branchIdsList').innerHTML = '';
+                    (task.branchIds || []).forEach(id => addBranchId(id));
+                }
+                
+                // 滚动到表单
+                document.getElementById('taskForm').scrollIntoView({ behavior: 'smooth' });
+                
+            } catch (error) {
+                alert('加载任务失败: ' + error.message);
+            }
+        }
+
+        // 开始轮询任务状态
+        function startStatusPolling(tasks) {
+            if (statusPollingInterval) {
+                clearInterval(statusPollingInterval);
+            }
+            
+            statusPollingInterval = setInterval(async () => {
+                for (const task of tasks) {
+                    try {
+                        const response = await fetch(`${TASK_API}/${task.id}/status`, {
+                            credentials: 'include',
+                        });
+                        
+                        if (response.ok) {
+                            const status = await response.json();
+                            updateTaskStatus(task.id, status);
+                        }
+                    } catch (error) {
+                        console.error('获取任务状态失败:', error);
+                    }
+                }
+            }, 5000); // 每5秒轮询一次
+        }
+
+        // 更新任务状态显示
+        function updateTaskStatus(taskId, status) {
+            const runningBadge = document.getElementById(`running-${taskId}`);
+            const nextExecSpan = document.getElementById(`next-exec-${taskId}`);
+            
+            if (status.isRunning) {
+                if (runningBadge) runningBadge.style.display = 'inline-block';
+            } else {
+                if (runningBadge) runningBadge.style.display = 'none';
+            }
+            
+            if (status.nextExecution && nextExecSpan) {
+                const nextExec = new Date(status.nextExecution);
+                nextExecSpan.textContent = `下次执行: ${nextExec.toLocaleString('zh-CN')}`;
+            }
+        }
+
+        // 页面加载时初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+        });
+
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            if (statusPollingInterval) {
+                clearInterval(statusPollingInterval);
+            }
+        });
+    </script>
+</body>
+</html>
+

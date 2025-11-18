@@ -25,3 +25,19 @@ Then, run Nest as usual:
 
 `npm run start`
 
+
+
+`docker-compose -f docker-compose.dev.yml down`
+`docker-compose -f docker-compose.dev.yml up -d`
+`docker-compose -f docker-compose.dev.yml logs app`
+
+```shell
+# 单独启动 mongoDB 
+docker-compose up -d mongodb
+
+# 查看应用日志
+docker-compose -f docker-compose.dev.yml logs -f app
+
+# 查看所有服务日志
+docker-compose -f docker-compose.dev.yml logs -f
+```

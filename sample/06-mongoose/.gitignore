@@ -29,3 +29,8 @@ npm-debug.log
 
 # logs
 /logs
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local

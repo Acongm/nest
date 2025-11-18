@@ -61,6 +61,10 @@ async function bootstrap() {
       htmlFile = 'login.html';
     } else if (req.path === '/register' || req.path.startsWith('/register')) {
       htmlFile = 'register.html';
+    } else if (req.path === '/scheduled-tasks' || req.path.startsWith('/scheduled-tasks')) {
+      htmlFile = 'scheduled-tasks.html';
+    } else if (req.path === '/task-execution-records' || req.path.startsWith('/task-execution-records')) {
+      htmlFile = 'task-execution-records.html';
     }
     
     try {

@@ -1,4 +1,4 @@
-import { Get, Put, Body, Controller, Req } from '@nestjs/common';
+import { Get, Put, Body, Controller, Req, Param } from '@nestjs/common';
 import { Request } from 'express';
 import { ScheduledTaskService } from './scheduled-task.service';
 import { CreateScheduledTaskDto } from './dto';
@@ -59,5 +59,24 @@ export class ScheduledTaskController {
     const tenantId = reqRequest.user.tenantId;
 
     return await this.scheduledTaskService.createOrUpdate(data, tenantId);
+  }
+
+  /**
+   * 获取任务运行状态
+   * @route GET /scheduled-tasks/:taskId/status
+   * @param taskId 任务ID
+   * @returns 任务运行状态
+   */
+  @Get(':taskId/status')
+  async getTaskStatus(
+    @Req() reqRequest: Request,
+    @Param('taskId') taskId: string,
+  ): Promise<{ isRunning: boolean; nextExecution?: Date }> {
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
+
+    return await this.scheduledTaskService.getTaskStatus(taskId, tenantId);
   }
 }

@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { ScheduledTask, ScheduledTaskDocument } from './schemas/scheduled-task.schema';
+import { TaskExecutionRecord, TaskExecutionRecordDocument } from './schemas/task-execution-record.schema';
 import { ReportExportService } from '../report-export/report-export.service';
 import { ScheduledTaskEmailService } from './scheduled-task-email.service';
 import { ExportTaskStatus } from '../report-export/schemas/export-task.schema';
@@ -20,6 +21,8 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   constructor(
     @InjectModel(ScheduledTask.name)
     private taskModel: Model<ScheduledTaskDocument>,
+    @InjectModel(TaskExecutionRecord.name)
+    private executionRecordModel: Model<TaskExecutionRecordDocument>,
     private schedulerRegistry: SchedulerRegistry,
     @Inject(forwardRef(() => ReportExportService))
     private reportExportService: ReportExportService,
@@ -137,6 +140,9 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
    * @param task 定时任务
    */
   private async executeTask(task: ScheduledTask): Promise<void> {
+    const executionStartTime = new Date();
+    let executionRecord: TaskExecutionRecordDocument | null = null;
+
     logger.info('开始执行定时任务', {
       taskId: task.id,
       pageIds: task.pageIds,
@@ -145,6 +151,20 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
     });
 
     try {
+      // 创建执行记录
+      executionRecord = new this.executionRecordModel({
+        taskId: task.id,
+        tenantId: task.tenantId,
+        status: 'success',
+        startTime: executionStartTime,
+        emailStatus: 'not_sent',
+        recipients: task.recipient,
+        totalExports: 0,
+        successfulExports: 0,
+        emailAttachments: [],
+      });
+      await executionRecord.save();
+
       // 计算时间范围（根据频率计算开始和结束时间）
       const { startTime, endTime } = this.calculateTimeRange(task.frequency);
 
@@ -175,6 +195,10 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
           });
         }
       }
+
+      // 更新总导出任务数
+      executionRecord.totalExports = exportTasks.length;
+      await executionRecord.save();
 
       // 等待所有导出任务完成
       const results = await Promise.allSettled(
@@ -210,10 +234,43 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
         }
       }
 
+      // 更新成功导出的任务数
+      executionRecord.successfulExports = successfulExports.length;
+      await executionRecord.save();
+
       // 发送邮件（如果有成功的导出）
+      let emailResult: { success: boolean; error?: string; attachments: Array<{ filename: string; path: string }> } | null = null;
       if (successfulExports.length > 0 && task.recipient.length > 0) {
-        await this.emailService.sendReportEmails(task, successfulExports);
+        try {
+          emailResult = await this.emailService.sendReportEmails(task, successfulExports);
+          if (emailResult.success) {
+            executionRecord.emailStatus = 'success';
+            executionRecord.emailAttachments = emailResult.attachments.map(att => ({
+              filename: att.filename,
+              path: att.path,
+            }));
+          } else {
+            executionRecord.emailStatus = 'failed';
+            executionRecord.emailErrorMessage = emailResult.error;
+          }
+        } catch (emailError) {
+          executionRecord.emailStatus = 'failed';
+          executionRecord.emailErrorMessage = emailError.message;
+          logger.error('发送邮件失败', {
+            taskId: task.id,
+            error: emailError.message,
+          });
+        }
+      } else if (task.recipient.length === 0) {
+        executionRecord.emailStatus = 'not_sent';
       }
+
+      // 更新执行记录为成功
+      const executionEndTime = new Date();
+      executionRecord.status = 'success';
+      executionRecord.endTime = executionEndTime;
+      executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
+      await executionRecord.save();
 
       logger.info('定时任务执行完成', {
         taskId: task.id,
@@ -227,16 +284,31 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
         stack: error.stack,
       });
 
-      // 发送失败通知邮件
-      if (task.recipient.length > 0) {
-        await this.emailService.sendFailureNotification(task, error).catch(
-          (emailError) => {
+      // 更新执行记录为失败
+      if (executionRecord) {
+        const executionEndTime = new Date();
+        executionRecord.status = 'failed';
+        executionRecord.endTime = executionEndTime;
+        executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
+        executionRecord.errorMessage = error.message;
+        executionRecord.errorStack = error.stack;
+        
+        // 发送失败通知邮件
+        if (task.recipient.length > 0) {
+          try {
+            await this.emailService.sendFailureNotification(task, error);
+            executionRecord.emailStatus = 'success';
+          } catch (emailError) {
+            executionRecord.emailStatus = 'failed';
+            executionRecord.emailErrorMessage = emailError.message;
             logger.error('发送失败通知邮件异常', {
               taskId: task.id,
               error: emailError.message,
             });
-          },
-        );
+          }
+        }
+        
+        await executionRecord.save();
       }
 
       throw error;
@@ -325,6 +397,41 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
     throw new Error(`任务超时：${taskId}`);
   }
 
+
+  /**
+   * 检查任务是否正在运行
+   * @param taskId 任务ID
+   * @param tenantId 租户ID
+   * @returns 是否正在运行
+   */
+  isTaskRunning(taskId: string, tenantId: string): boolean {
+    const jobName = `scheduled-task-${taskId}-${tenantId}`;
+    return this.schedulerRegistry.doesExist('cron', jobName);
+  }
+
+  /**
+   * 获取任务的运行状态信息
+   * @param taskId 任务ID
+   * @param tenantId 租户ID
+   * @returns 运行状态信息
+   */
+  getTaskStatus(taskId: string, tenantId: string): { isRunning: boolean; nextExecution?: Date } {
+    const jobName = `scheduled-task-${taskId}-${tenantId}`;
+    const isRunning = this.schedulerRegistry.doesExist('cron', jobName);
+    
+    let nextExecution: Date | undefined;
+    if (isRunning) {
+      const job = this.schedulerRegistry.getCronJob(jobName);
+      if (job && job.nextDates) {
+        nextExecution = job.nextDates().toDate();
+      }
+    }
+
+    return {
+      isRunning,
+      nextExecution,
+    };
+  }
 
   /**
    * 清理所有定时任务

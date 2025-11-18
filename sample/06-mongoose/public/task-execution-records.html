@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>定时任务执行记录 - 报表导出系统</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        h2 {
+            color: #555;
+            border-bottom: 2px solid #1976d2;
+            padding-bottom: 10px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .user-info span {
+            color: #666;
+        }
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .nav-link {
+            padding: 8px 16px;
+            background-color: #1976d2;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .nav-link:hover {
+            background-color: #1565c0;
+        }
+        .logout-btn {
+            background-color: #dc3545;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .logout-btn:hover:not(:disabled) {
+            background-color: #c82333;
+        }
+        button {
+            background-color: #1976d2;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background-color 0.3s;
+        }
+        button:hover:not(:disabled) {
+            background-color: #1565c0;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .filter-group label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+        .filter-group select, .filter-group input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .record-list {
+            margin-top: 20px;
+        }
+        .record-item {
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            background-color: #f9f9f9;
+        }
+        .record-item.success {
+            border-left: 4px solid #28a745;
+        }
+        .record-item.failed {
+            border-left: 4px solid #dc3545;
+        }
+        .record-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .record-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+        .record-status {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-badge.failed {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status-badge.not_sent {
+            background-color: #e2e3e5;
+            color: #383d41;
+        }
+        .record-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .record-info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .record-info-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .record-info-value {
+            font-size: 14px;
+            color: #333;
+            font-weight: 500;
+        }
+        .record-details {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+        }
+        .detail-section {
+            margin-bottom: 15px;
+        }
+        .detail-section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .attachment-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .attachment-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .attachment-icon {
+            font-size: 16px;
+        }
+        .recipient-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .recipient-tag {
+            padding: 4px 8px;
+            background-color: #e7f3ff;
+            color: #0066cc;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #1976d2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .pagination button {
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📋 定时任务执行记录</h1>
+            <div class="user-info">
+                <span>欢迎，<strong id="currentUsername"></strong></span>
+                <button class="logout-btn" onclick="handleLogout()">登出</button>
+            </div>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">报表导出</a>
+            <a href="/scheduled-tasks" class="nav-link">定时任务</a>
+            <a href="/task-execution-records" class="nav-link">执行记录</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h2>执行记录列表</h2>
+            <button onclick="loadRecords()">刷新列表</button>
+        </div>
+
+        <div class="filters">
+            <div class="filter-group">
+                <label>任务ID</label>
+                <input type="text" id="filterTaskId" placeholder="筛选任务ID">
+            </div>
+            <div class="filter-group">
+                <label>执行状态</label>
+                <select id="filterStatus">
+                    <option value="">全部</option>
+                    <option value="success">成功</option>
+                    <option value="failed">失败</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>邮件状态</label>
+                <select id="filterEmailStatus">
+                    <option value="">全部</option>
+                    <option value="success">发送成功</option>
+                    <option value="failed">发送失败</option>
+                    <option value="not_sent">未发送</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>限制数量</label>
+                <select id="filterLimit">
+                    <option value="50">50条</option>
+                    <option value="100" selected>100条</option>
+                    <option value="200">200条</option>
+                </select>
+            </div>
+            <div class="filter-group" style="justify-content: flex-end;">
+                <label>&nbsp;</label>
+                <button onclick="applyFilters()">应用筛选</button>
+            </div>
+        </div>
+
+        <div id="recordList" class="record-list">
+            <p>加载中...</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const AUTH_API = `${API_BASE}/auth`;
+        const RECORD_API = `${API_BASE}/scheduled-tasks/execution-records`;
+        let currentUser = null;
+        let allRecords = [];
+
+        // 检查登录状态
+        async function checkAuth() {
+            try {
+                const response = await fetch(`${AUTH_API}/me`, {
+                    credentials: 'include',
+                });
+                
+                if (response.ok) {
+                    currentUser = await response.json();
+                    document.getElementById('currentUsername').textContent = currentUser.username;
+                    loadRecords();
+                } else {
+                    window.location.href = '/login';
+                }
+            } catch (error) {
+                console.error('检查认证状态失败:', error);
+                window.location.href = '/login';
+            }
+        }
+
+        // 登出
+        async function handleLogout() {
+            try {
+                await fetch(`${AUTH_API}/logout`, {
+                    method: 'POST',
+                    credentials: 'include',
+                });
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('登出失败:', error);
+            }
+        }
+
+        // 加载执行记录
+        async function loadRecords() {
+            const recordList = document.getElementById('recordList');
+            recordList.innerHTML = '<p>加载中...</p>';
+            
+            try {
+                const limit = document.getElementById('filterLimit').value;
+                const url = `${RECORD_API}?limit=${limit}`;
+                
+                const response = await fetch(url, {
+                    credentials: 'include',
+                });
+                
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error('获取执行记录失败');
+                }
+                
+                const data = await response.json();
+                allRecords = data.records || [];
+                
+                applyFilters();
+                
+            } catch (error) {
+                recordList.innerHTML = `<div class="error">错误: ${error.message}</div>`;
+            }
+        }
+
+        // 应用筛选
+        function applyFilters() {
+            const taskIdFilter = document.getElementById('filterTaskId').value.toLowerCase();
+            const statusFilter = document.getElementById('filterStatus').value;
+            const emailStatusFilter = document.getElementById('filterEmailStatus').value;
+            
+            let filteredRecords = allRecords;
+            
+            if (taskIdFilter) {
+                filteredRecords = filteredRecords.filter(r => 
+                    r.taskId.toLowerCase().includes(taskIdFilter)
+                );
+            }
+            
+            if (statusFilter) {
+                filteredRecords = filteredRecords.filter(r => r.status === statusFilter);
+            }
+            
+            if (emailStatusFilter) {
+                filteredRecords = filteredRecords.filter(r => r.emailStatus === emailStatusFilter);
+            }
+            
+            displayRecords(filteredRecords);
+        }
+
+        // 显示记录列表
+        function displayRecords(records) {
+            const recordList = document.getElementById('recordList');
+            
+            if (records.length === 0) {
+                recordList.innerHTML = '<div class="empty-state">暂无执行记录</div>';
+                return;
+            }
+            
+            recordList.innerHTML = records.map(record => createRecordItem(record)).join('');
+        }
+
+        // 创建记录项HTML
+        function createRecordItem(record) {
+            const statusClass = record.status;
+            const statusText = {
+                'success': '✅ 成功',
+                'failed': '❌ 失败'
+            }[record.status] || record.status;
+
+            const emailStatusText = {
+                'success': '✅ 发送成功',
+                'failed': '❌ 发送失败',
+                'not_sent': '⏸️ 未发送'
+            }[record.emailStatus] || record.emailStatus;
+
+            const startTime = new Date(record.startTime).toLocaleString('zh-CN');
+            const endTime = record.endTime ? new Date(record.endTime).toLocaleString('zh-CN') : '-';
+            const duration = record.duration ? `${(record.duration / 1000).toFixed(2)}秒` : '-';
+            const createdAt = new Date(record.createdAt).toLocaleString('zh-CN');
+
+            return `
+                <div class="record-item ${statusClass}">
+                    <div class="record-header">
+                        <div class="record-title">任务ID: ${record.taskId}</div>
+                        <div class="record-status">
+                            <span class="status-badge ${statusClass}">${statusText}</span>
+                            <span class="status-badge ${record.emailStatus}">${emailStatusText}</span>
+                        </div>
+                    </div>
+                    <div class="record-info">
+                        <div class="record-info-item">
+                            <span class="record-info-label">开始时间</span>
+                            <span class="record-info-value">${startTime}</span>
+                        </div>
+                        <div class="record-info-item">
+                            <span class="record-info-label">结束时间</span>
+                            <span class="record-info-value">${endTime}</span>
+                        </div>
+                        <div class="record-info-item">
+                            <span class="record-info-label">执行耗时</span>
+                            <span class="record-info-value">${duration}</span>
+                        </div>
+                        <div class="record-info-item">
+                            <span class="record-info-label">创建时间</span>
+                            <span class="record-info-value">${createdAt}</span>
+                        </div>
+                        <div class="record-info-item">
+                            <span class="record-info-label">导出任务</span>
+                            <span class="record-info-value">${record.successfulExports || 0}/${record.totalExports || 0} 成功</span>
+                        </div>
+                    </div>
+                    <div class="record-details">
+                        ${record.errorMessage ? `
+                            <div class="detail-section">
+                                <div class="detail-section-title">❌ 错误信息</div>
+                                <div class="error-message">${escapeHtml(record.errorMessage)}</div>
+                            </div>
+                        ` : ''}
+                        ${record.emailErrorMessage ? `
+                            <div class="detail-section">
+                                <div class="detail-section-title">❌ 邮件发送错误</div>
+                                <div class="error-message">${escapeHtml(record.emailErrorMessage)}</div>
+                            </div>
+                        ` : ''}
+                        ${record.recipients && record.recipients.length > 0 ? `
+                            <div class="detail-section">
+                                <div class="detail-section-title">📧 收件人</div>
+                                <div class="recipient-list">
+                                    ${record.recipients.map(email => `
+                                        <span class="recipient-tag">${escapeHtml(email)}</span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${record.emailAttachments && record.emailAttachments.length > 0 ? `
+                            <div class="detail-section">
+                                <div class="detail-section-title">📎 邮件附件 (${record.emailAttachments.length}个)</div>
+                                <div class="attachment-list">
+                                    ${record.emailAttachments.map(att => `
+                                        <div class="attachment-item">
+                                            <span class="attachment-icon">📄</span>
+                                            <span>${escapeHtml(att.filename)}</span>
+                                            <span style="color: #666; font-size: 11px; margin-left: auto;">${escapeHtml(att.path)}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : record.emailStatus === 'success' ? `
+                            <div class="detail-section">
+                                <div class="detail-section-title">📎 邮件附件</div>
+                                <div style="color: #666; font-size: 13px;">无附件</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // HTML转义
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 页面加载时初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+        });
+    </script>
+</body>
+</html>
+

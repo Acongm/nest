@@ -13,7 +13,7 @@ export class EmailService {
   constructor() {
     // 从环境变量读取邮件配置
     const emailConfig = {
-      host: process.env.SMTP_HOST || 'smtp.qq.com',
+      host: process.env.SMTP_HOST || 'smtp.163.com',
       port: parseInt(process.env.SMTP_PORT || '587', 10),
       secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
       auth: {

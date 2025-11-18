@@ -3,6 +3,7 @@
  * @enum {FrequencyEnum}
  */
 export enum FrequencyEnum {
+  TEST = 'test',
   /** 每天执行 */
   DAILY = 'daily',
   /** 每周执行 */

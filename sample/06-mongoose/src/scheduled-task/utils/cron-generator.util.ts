@@ -42,6 +42,9 @@ export class CronGenerator {
       case FrequencyEnum.DAILY:
         // 每天执行：0 分 时 * * *
         return `${second} ${min} ${hr} * * *`;
+      case FrequencyEnum.DAILY:
+        // 每天执行：0 分 时 * * *
+        return `${second} ${min} ${hr} * * *`;
 
       case FrequencyEnum.WEEKLY:
         // 每周执行：需要 week 字段

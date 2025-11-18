@@ -16,6 +16,7 @@ export class ScheduledTaskEmailService {
    * 为每个成功的导出任务发送邮件
    * @param task 定时任务
    * @param successfulExports 成功的导出任务列表
+   * @returns 返回发送结果，包含成功状态、错误信息和附件列表
    */
   async sendReportEmails(
     task: ScheduledTask,
@@ -24,18 +25,32 @@ export class ScheduledTaskEmailService {
       pageId: string;
       branchId: string;
     }>,
-  ): Promise<void> {
+  ): Promise<{ success: boolean; error?: string; attachments: Array<{ filename: string; path: string }> }> {
     logger.info('开始发送报表邮件', {
       taskId: task.id,
       exportCount: successfulExports.length,
       recipients: task.recipient,
     });
 
+    const attachments: Array<{ filename: string; path: string }> = [];
+    let hasError = false;
+    let lastError: string | undefined;
+
     // 为每个成功的导出发送邮件
     for (const { task: exportTask, pageId, branchId } of successfulExports) {
       try {
+        const reportFileName = this.generateReportFileName(pageId, branchId);
         await this.sendSingleReportEmail(task, exportTask, pageId, branchId);
+        // 记录附件信息
+        if (exportTask.filePath) {
+          attachments.push({
+            filename: reportFileName,
+            path: exportTask.filePath,
+          });
+        }
       } catch (error) {
+        hasError = true;
+        lastError = error.message;
         logger.error('报表邮件发送失败', {
           taskId: task.id,
           pageId,
@@ -49,7 +64,14 @@ export class ScheduledTaskEmailService {
     logger.info('报表邮件发送完成', {
       taskId: task.id,
       totalSent: successfulExports.length,
+      attachmentsCount: attachments.length,
     });
+
+    return {
+      success: !hasError,
+      error: hasError ? lastError : undefined,
+      attachments,
+    };
   }
 
   /**
