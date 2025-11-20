@@ -4,8 +4,10 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import * as cookieParser from 'cookie-parser';
+import * as mongoose from 'mongoose';
 import { AppModule } from './app.module';
 import { logger } from './common/logger';
+import { idTransformPlugin } from './common/mongoose-id-transform.plugin';
 
 async function bootstrap() {
   // 确保日志目录存在
@@ -13,6 +15,10 @@ async function bootstrap() {
   if (!existsSync(logsDir)) {
     mkdirSync(logsDir, { recursive: true });
   }
+
+  // 注册全局 Mongoose 插件，统一将 _id 转换为 id
+  // 必须在应用启动之前注册，这样所有 Schema 都会自动应用
+  mongoose.plugin(idTransformPlugin);
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   

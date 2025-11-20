@@ -95,8 +95,8 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       'Asia/Shanghai', // timeZone
     );
 
-    // 注册任务
-    this.schedulerRegistry.addCronJob(jobName, job);
+    // 注册任务（使用类型断言解决类型不匹配问题）
+    this.schedulerRegistry.addCronJob(jobName, job as any);
 
     logger.info('定时任务已调度', {
       taskId: task.id,

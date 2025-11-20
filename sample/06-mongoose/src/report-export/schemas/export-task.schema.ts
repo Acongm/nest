@@ -78,9 +78,17 @@ ExportTaskSchema.index({ tenantId: 1, assetId: 1, createdAt: -1 });
 ExportTaskSchema.index({ status: 1, createdAt: -1 });
 
 // 在 JSON 序列化时排除 filePath 字段
+// 注意：全局插件已经将 _id 转换为 id 并删除 __v，这里只需要处理 filePath
+// 需要合并全局插件的 transform 和本地的 transform
 ExportTaskSchema.set('toJSON', {
   transform: function(doc, ret) {
-    // 删除 filePath 字段，不返回给客户端
+    // 先应用全局插件的转换（_id -> id, 删除 __v）
+    if (ret._id) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+    }
+    delete ret.__v;
+    // 然后删除 filePath 字段
     delete ret.filePath;
     return ret;
   },
@@ -89,7 +97,13 @@ ExportTaskSchema.set('toJSON', {
 // 在对象序列化时也排除 filePath 字段
 ExportTaskSchema.set('toObject', {
   transform: function(doc, ret) {
-    // 删除 filePath 字段，不返回给客户端
+    // 先应用全局插件的转换（_id -> id, 删除 __v）
+    if (ret._id) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+    }
+    delete ret.__v;
+    // 然后删除 filePath 字段
     delete ret.filePath;
     return ret;
   },

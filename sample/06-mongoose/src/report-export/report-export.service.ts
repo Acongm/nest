@@ -212,7 +212,7 @@ export class ReportExportService {
 
     if (todayExports >= this.MAX_DAILY_EXPORTS) {
       throw new BadRequestException(
-        `当日导出次数已达上限（${this.MAX_DAILY_EXPORTS}次），请明天再试`,
+        `当日导出次数已达上限（${todayExports}/${this.MAX_DAILY_EXPORTS}次），请明天再试`,
       );
     }
   }
