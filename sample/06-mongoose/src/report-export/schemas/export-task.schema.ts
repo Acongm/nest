@@ -77,3 +77,21 @@ ExportTaskSchema.index({ tenantId: 1, createdAt: -1 });
 ExportTaskSchema.index({ tenantId: 1, assetId: 1, createdAt: -1 });
 ExportTaskSchema.index({ status: 1, createdAt: -1 });
 
+// 在 JSON 序列化时排除 filePath 字段
+ExportTaskSchema.set('toJSON', {
+  transform: function(doc, ret) {
+    // 删除 filePath 字段，不返回给客户端
+    delete ret.filePath;
+    return ret;
+  },
+});
+
+// 在对象序列化时也排除 filePath 字段
+ExportTaskSchema.set('toObject', {
+  transform: function(doc, ret) {
+    // 删除 filePath 字段，不返回给客户端
+    delete ret.filePath;
+    return ret;
+  },
+});
+

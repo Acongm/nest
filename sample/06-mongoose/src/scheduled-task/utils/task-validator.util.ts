@@ -14,8 +14,22 @@ export class TaskValidator {
    */
   static validateEnableTask(taskData: CreateScheduledTaskDto): void {
     // 验证基本必填字段
-    if (!taskData.frequency || !taskData.time || !taskData.recipient || !taskData.pageIds || !taskData.branchIds) {
-      throw new Error('enable: true 时，frequency、time、recipient、pageIds、branchIds 都是必填字段');
+    if (!taskData.frequency || !taskData.time || !taskData.recipient || !taskData.pageIds) {
+      throw new Error('enable: true 时，frequency、time、recipient、pageIds 都是必填字段');
+    }
+
+    // 验证数组字段不能为空
+    if (!Array.isArray(taskData.pageIds) || taskData.pageIds.length === 0) {
+      throw new Error('pageIds 不能为空，至少需要配置一个页面ID');
+    }
+
+    // branchIds 允许为空数组（可选字段）
+    if (taskData.branchIds !== undefined && !Array.isArray(taskData.branchIds)) {
+      throw new Error('branchIds 必须是数组');
+    }
+
+    if (!Array.isArray(taskData.recipient) || taskData.recipient.length === 0) {
+      throw new Error('recipient 不能为空，至少需要配置一个收件人邮箱');
     }
 
     // 验证 time 对象中的必填字段

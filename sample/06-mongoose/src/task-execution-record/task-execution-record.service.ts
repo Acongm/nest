@@ -43,8 +43,23 @@ export class TaskExecutionRecordService {
     tenantId: string,
     limit: number = 100,
   ): Promise<TaskExecutionRecord[]> {
-    return await this.executionRecordModel
+    const records = await this.executionRecordModel
       .find({ tenantId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .exec();
+    
+    return records;
+  }
+  
+  /**
+   * 获取所有执行记录（用于调试，不按租户过滤）
+   * @param limit 限制返回数量
+   * @returns 执行记录列表
+   */
+  async findAll(limit: number = 100): Promise<TaskExecutionRecord[]> {
+    return await this.executionRecordModel
+      .find({})
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();

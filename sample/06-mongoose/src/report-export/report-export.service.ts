@@ -11,8 +11,11 @@ import { logger } from '../common/logger';
 
 @Injectable()
 export class ReportExportService {
-  // 当日最大导出次数
-  private readonly MAX_DAILY_EXPORTS = 10;
+  // 当日最大导出次数（从环境变量读取，默认 10 次）
+  private readonly MAX_DAILY_EXPORTS = parseInt(
+    process.env.MAX_DAILY_EXPORTS || '10',
+    10,
+  );
   // 文件存储目录
   private readonly UPLOAD_DIR = join(process.cwd(), 'uploads', 'reports');
   // 基础URL（用于生成下载链接）
@@ -47,6 +50,7 @@ export class ReportExportService {
     }
     logger.info('报表导出服务初始化完成', {
       maxConcurrent: this.MAX_CONCURRENT_EXPORTS,
+      maxDailyExports: this.MAX_DAILY_EXPORTS,
       uploadDir: this.UPLOAD_DIR,
       taskTimeout: this.TASK_TIMEOUT,
     });
@@ -54,26 +58,82 @@ export class ReportExportService {
 
   /**
    * 创建导出任务
+   * 如果提供了 branchIds，会为每个 branchId 创建一个导出任务
+   * @param createDto 创建导出任务DTO
+   * @param tenantId 租户ID
+   * @returns 如果提供了 branchIds，返回所有创建的任务数组；否则返回单个任务
    */
-  async createExportTask(createDto: CreateExportTaskDto, tenantId: string): Promise<ExportTask> {
+  async createExportTask(createDto: CreateExportTaskDto, tenantId: string): Promise<ExportTask | ExportTask[]> {
     // 1. 验证参数
     this.validateParams(createDto);
 
-    // 2. 检查当日导出次数（按租户和资产ID）
-    await this.checkDailyExportLimit(createDto.assetId, tenantId);
+    // 2. 如果提供了 branchIds，为每个 branchId 创建导出任务
+    if (createDto.branchIds && createDto.branchIds.length > 0) {
+      const tasks: ExportTask[] = [];
+      
+      for (const branchId of createDto.branchIds) {
+        // 为每个 branchId 检查当日导出次数
+        await this.checkDailyExportLimit(branchId, tenantId);
 
-    // 3. 创建任务记录（状态：待处理）
+        // 构建该 branchId 对应的 reportPage
+        const reportPage = this.buildReportPageForBranch(createDto.reportPage, branchId);
+
+        // 创建任务记录（状态：待处理）
+        const task = new this.exportTaskModel({
+          startTime: new Date(createDto.startTime),
+          endTime: new Date(createDto.endTime),
+          assetId: branchId,
+          reportPage,
+          taskName: createDto.taskName,
+          tenantId,
+          status: ExportTaskStatus.PENDING,
+        });
+        const savedTask = await task.save();
+        tasks.push(savedTask);
+
+        // 使用并发限制器异步执行导出任务（不阻塞响应）
+        this.limit(() => this.processExportTask(savedTask._id.toString())).catch(
+          (error) => {
+            logger.error('导出任务执行失败', {
+              taskId: savedTask._id.toString(),
+              branchId,
+              error: error.message,
+              stack: error.stack,
+            });
+          },
+        );
+      }
+
+      logger.info('批量创建导出任务完成', {
+        branchIdsCount: createDto.branchIds.length,
+        tasksCount: tasks.length,
+        taskIds: tasks.map(t => t._id.toString()),
+      });
+
+      // 返回所有任务数组
+      return tasks;
+    }
+
+    // 3. 单个任务创建逻辑（当 branchIds 为空或未提供时）
+    // 如果没有提供 assetId，使用 reportPage 作为默认 assetId
+    const assetId = createDto.assetId || createDto.reportPage || 'default';
+    
+    // 检查当日导出次数（按租户和资产ID）
+    await this.checkDailyExportLimit(assetId, tenantId);
+
+    // 创建任务记录（状态：待处理）
     const task = new this.exportTaskModel({
-      ...createDto,
-      tenantId, // 添加租户ID
       startTime: new Date(createDto.startTime),
       endTime: new Date(createDto.endTime),
+      assetId,
+      reportPage: createDto.reportPage,
+      taskName: createDto.taskName,
+      tenantId, // 添加租户ID
       status: ExportTaskStatus.PENDING,
     });
     const savedTask = await task.save();
 
-    // 4. 使用并发限制器异步执行导出任务（不阻塞响应）
-    // 这样可以控制同时运行的浏览器实例数量，避免服务器崩溃
+    // 使用并发限制器异步执行导出任务（不阻塞响应）
     this.limit(() => this.processExportTask(savedTask._id.toString())).catch(
       (error) => {
         logger.error('导出任务执行失败', {
@@ -85,6 +145,25 @@ export class ReportExportService {
     );
 
     return savedTask;
+  }
+
+  /**
+   * 为分支ID构建报表页面URL
+   * @param reportPage 原始报表页面URL或路径
+   * @param branchId 分支ID
+   * @returns 构建后的报表页面URL
+   */
+  private buildReportPageForBranch(reportPage: string, branchId: string): string {
+    // 如果 reportPage 已经是完整 URL，添加 branchId 参数
+    try {
+      const url = new URL(reportPage);
+      url.searchParams.set('branchId', branchId);
+      return url.toString();
+    } catch {
+      // 如果是相对路径，添加 branchId 参数
+      const separator = reportPage.includes('?') ? '&' : '?';
+      return `${reportPage}${separator}branchId=${branchId}`;
+    }
   }
 
   /**
@@ -109,6 +188,8 @@ export class ReportExportService {
     if (!this.isValidUrl(dto.reportPage) && !dto.reportPage.startsWith('/')) {
       throw new BadRequestException('报表页面必须是有效的URL或路径');
     }
+
+    // 允许 branchIds 为空数组，此时如果没有 assetId，会在 createExportTask 中使用默认值
   }
 
   /**
@@ -164,7 +245,7 @@ export class ReportExportService {
       });
 
       // 使用子进程导出PDF（带超时控制）
-      const filePath = await Promise.race([
+      const absoluteFilePath = await Promise.race([
         this.exportToPdfViaWorker(reportUrl, taskId),
         new Promise<never>((_, reject) =>
           setTimeout(
@@ -174,18 +255,23 @@ export class ReportExportService {
         ),
       ]);
 
+      // 将绝对路径转换为相对路径（相对于 UPLOAD_DIR）
+      // 例如：/path/to/uploads/reports/file.pdf -> reports/file.pdf
+      const relativeFilePath = this.getRelativeFilePath(absoluteFilePath);
+
       // 生成下载URL
       const downloadUrl = `/api/report-export/download/${taskId}`;
 
       // 更新任务状态为已完成
       task.status = ExportTaskStatus.COMPLETED;
-      task.filePath = filePath;
+      task.filePath = relativeFilePath; // 保存相对路径
       task.downloadUrl = downloadUrl;
       await task.save();
 
       logger.info('导出任务完成', {
         taskId,
-        filePath,
+        relativeFilePath,
+        absoluteFilePath,
         downloadUrl,
       });
     } catch (error) {
@@ -405,13 +491,70 @@ export class ReportExportService {
 
   /**
    * 获取任务文件路径（验证租户ID）
+   * 返回绝对路径，用于读取文件
    */
   async getTaskFilePath(taskId: string, tenantId: string): Promise<string> {
     const task = await this.findOne(taskId, tenantId);
     if (task.status !== ExportTaskStatus.COMPLETED || !task.filePath) {
       throw new HttpException('文件不存在或任务未完成', HttpStatus.NOT_FOUND);
     }
-    return task.filePath;
+    
+    // 将相对路径转换为绝对路径
+    return this.getAbsoluteFilePath(task.filePath);
+  }
+
+  /**
+   * 将绝对路径转换为相对路径（相对于 UPLOAD_DIR）
+   * @param absolutePath 绝对路径
+   * @returns 相对路径
+   */
+  private getRelativeFilePath(absolutePath: string): string {
+    // 如果路径已经是相对路径，直接返回
+    if (!absolutePath.startsWith('/') && !absolutePath.match(/^[A-Za-z]:/)) {
+      return absolutePath;
+    }
+    
+    // 获取相对于 UPLOAD_DIR 的路径
+    const normalizedUploadDir = this.UPLOAD_DIR.replace(/\\/g, '/');
+    const normalizedAbsolutePath = absolutePath.replace(/\\/g, '/');
+    
+    if (normalizedAbsolutePath.startsWith(normalizedUploadDir)) {
+      // 提取相对路径部分
+      const relativePath = normalizedAbsolutePath.substring(normalizedUploadDir.length);
+      // 移除开头的斜杠
+      return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+    }
+    
+    // 如果路径不在 UPLOAD_DIR 下，尝试提取文件名部分
+    // 格式：uploads/reports/report_xxx.pdf
+    const match = normalizedAbsolutePath.match(/uploads\/reports\/(.+)$/);
+    if (match) {
+      return `reports/${match[1]}`;
+    }
+    
+    // 如果无法转换，返回文件名
+    const fileName = absolutePath.split('/').pop() || absolutePath.split('\\').pop() || 'unknown.pdf';
+    return `reports/${fileName}`;
+  }
+
+  /**
+   * 将相对路径转换为绝对路径
+   * @param relativePath 相对路径
+   * @returns 绝对路径
+   */
+  private getAbsoluteFilePath(relativePath: string): string {
+    // 如果已经是绝对路径，直接返回
+    if (relativePath.startsWith('/') || relativePath.match(/^[A-Za-z]:/)) {
+      return relativePath;
+    }
+    
+    // 如果相对路径以 reports/ 开头，直接拼接
+    if (relativePath.startsWith('reports/')) {
+      return join(this.UPLOAD_DIR, relativePath.substring('reports/'.length));
+    }
+    
+    // 否则，假设是相对于 UPLOAD_DIR 的路径
+    return join(this.UPLOAD_DIR, relativePath);
   }
 
   /**

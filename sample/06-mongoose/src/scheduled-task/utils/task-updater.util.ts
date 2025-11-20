@@ -84,21 +84,25 @@ export class TaskUpdater {
 
     if (existingTask) {
       // 使用 findOneAndUpdate 更新现有任务
+      const updateData: any = {
+        enable: true,
+        frequency: taskData.frequency!,
+        time: taskData.time!,
+        recipient: taskData.recipient!,
+        pageIds: taskData.pageIds!,
+        cronExpression,
+        updated: new Date(),
+      };
+      
+      // branchIds 允许为空数组，如果提供了就更新
+      if (taskData.branchIds !== undefined) {
+        updateData.branchIds = taskData.branchIds;
+      }
+      
       const updatedTask = await taskModel
         .findOneAndUpdate(
           { id: taskId, tenantId },
-          {
-            $set: {
-              enable: true,
-              frequency: taskData.frequency!,
-              time: taskData.time!,
-              recipient: taskData.recipient!,
-              pageIds: taskData.pageIds!,
-              branchIds: taskData.branchIds!,
-              cronExpression,
-              updated: new Date(),
-            }
-          },
+          { $set: updateData },
           { new: true } // 返回更新后的文档
         )
         .exec();
@@ -110,7 +114,7 @@ export class TaskUpdater {
       return updatedTask;
     } else {
       // 创建新任务
-      const newTask = new taskModel({
+      const newTaskData: any = {
         id: taskId,
         tenantId,
         enable: true,
@@ -118,11 +122,13 @@ export class TaskUpdater {
         time: taskData.time!,
         recipient: taskData.recipient!,
         pageIds: taskData.pageIds!,
-        branchIds: taskData.branchIds!,
+        branchIds: taskData.branchIds || [], // 如果未提供，使用空数组
         cronExpression,
         created: new Date(),
         updated: new Date(),
-      });
+      };
+      
+      const newTask = new taskModel(newTaskData);
       return await newTask.save();
     }
   }
