@@ -87,4 +87,14 @@ export class ScheduledTaskService {
   getTaskStatus(taskId: string, tenantId: string): { isRunning: boolean; nextExecution?: Date } {
     return this.schedulerService.getTaskStatus(taskId, tenantId);
   }
+
+  /**
+   * 立即触发执行指定任务（用于测试）
+   * @param taskId 任务ID
+   * @param tenantId 租户ID
+   * @returns Promise<void>
+   */
+  async triggerTaskExecution(taskId: string, tenantId: string): Promise<void> {
+    return await this.schedulerService.triggerTaskExecution(taskId, tenantId);
+  }
 }

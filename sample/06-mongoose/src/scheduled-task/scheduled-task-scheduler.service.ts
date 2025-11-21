@@ -136,6 +136,38 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   }
 
   /**
+   * 立即触发执行指定任务（用于测试）
+   * @param taskId 任务ID
+   * @param tenantId 租户ID
+   * @returns Promise<void>
+   */
+  async triggerTaskExecution(taskId: string, tenantId: string): Promise<void> {
+    logger.info('手动触发定时任务执行', { taskId, tenantId });
+
+    // 查找任务
+    const task = await this.taskModel.findOne({ id: taskId, tenantId }).exec();
+    if (!task) {
+      throw new Error(`任务不存在：${taskId} (租户: ${tenantId})`);
+    }
+
+    if (!task.enable) {
+      throw new Error(`任务未启用：${taskId}`);
+    }
+
+    // 执行任务（异步执行，不阻塞）
+    this.executeTask(task).catch((error) => {
+      logger.error('手动触发任务执行失败', {
+        taskId,
+        tenantId,
+        error: error.message,
+        stack: error.stack,
+      });
+    });
+
+    logger.info('定时任务已触发执行', { taskId, tenantId });
+  }
+
+  /**
    * 执行定时任务
    * @param task 定时任务
    */
