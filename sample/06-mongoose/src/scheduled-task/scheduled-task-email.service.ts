@@ -45,24 +45,24 @@ export class ScheduledTaskEmailService {
     // path: 相对路径（用于保存到数据库）
     // absolutePath: 绝对路径（用于读取文件发送邮件）
     const attachments: Array<{ filename: string; path: string; absolutePath: string }> = [];
-    
+
     for (const { task: exportTask, pageId, branchId } of successfulExports) {
       if (exportTask.filePath) {
         const reportFileName = this.generateReportFileName(pageId, branchId);
         // 将相对路径转换为绝对路径（用于读取文件）
         const absolutePath = this.getAbsoluteFilePath(exportTask.filePath);
-        attachments.push({
-          filename: reportFileName,
+          attachments.push({
+            filename: reportFileName,
           path: exportTask.filePath, // 保存相对路径（用于数据库记录）
           absolutePath, // 使用绝对路径（用于发送邮件）
-        });
-      }
+          });
+        }
     }
 
     // 如果没有附件，直接返回
     if (attachments.length === 0) {
       logger.warn('没有可发送的附件', {
-        taskId: task.id,
+          taskId: task.id,
       });
       return {
         success: true,
@@ -73,14 +73,14 @@ export class ScheduledTaskEmailService {
     // 发送一封包含所有附件的邮件
     try {
       await this.sendConsolidatedReportEmail(task, attachments, successfulExports.length);
-      
-      logger.info('报表邮件发送完成', {
-        taskId: task.id,
-        recipients: task.recipient,
-        attachmentsCount: attachments.length,
-      });
 
-      return {
+    logger.info('报表邮件发送完成', {
+      taskId: task.id,
+        recipients: task.recipient,
+      attachmentsCount: attachments.length,
+    });
+
+    return {
         success: true,
         attachments,
       };
@@ -94,8 +94,8 @@ export class ScheduledTaskEmailService {
       return {
         success: false,
         error: error.message,
-        attachments,
-      };
+      attachments,
+    };
     }
   }
 

@@ -1,11 +1,12 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 export interface CurrentUserData {
-  userId: string;
+  userId: string; // 用户ID（实际上是 MongoDB _id）
   tenantId: string;
   companyId: string;
   username: string;
-  id: string;
+  roles?: string[]; // 用户角色列表
+  id: string; // MongoDB _id
 }
 
 // 类型守卫函数，帮助 TypeScript 识别类型

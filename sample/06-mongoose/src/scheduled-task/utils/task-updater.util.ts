@@ -85,13 +85,13 @@ export class TaskUpdater {
     if (existingTask) {
       // 使用 findOneAndUpdate 更新现有任务
       const updateData: any = {
-        enable: true,
-        frequency: taskData.frequency!,
-        time: taskData.time!,
-        recipient: taskData.recipient!,
-        pageIds: taskData.pageIds!,
-        cronExpression,
-        updated: new Date(),
+              enable: true,
+              frequency: taskData.frequency!,
+              time: taskData.time!,
+              recipient: taskData.recipient!,
+              pageIds: taskData.pageIds!,
+              cronExpression,
+              updated: new Date(),
       };
       
       // branchIds 允许为空数组，如果提供了就更新

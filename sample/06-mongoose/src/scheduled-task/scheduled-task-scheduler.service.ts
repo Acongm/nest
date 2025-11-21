@@ -183,7 +183,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
           pageIds: task.pageIds,
         });
       }
-      
+
       // 为每个 pageId 和 branchId 组合创建导出任务
       const exportTasks = [];
 
@@ -257,8 +257,8 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
             const exportTask = createdTasks[i];
             // 如果 branchIds 有值，使用对应的 branchId；否则使用 undefined
             const branchId = task.branchIds && task.branchIds.length > 0 ? task.branchIds[i] : undefined;
-            
-            exportTasks.push({
+
+          exportTasks.push({
               exportTask: Promise.resolve(exportTask),
               pageId,
               branchId, // 保存对应的 branchId（可能为 undefined）
@@ -311,11 +311,11 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
           });
 
           try {
-            // 等待任务完成（使用定时任务的 tenantId）
-            const completedTask = await this.waitForTaskCompletion(
+          // 等待任务完成（使用定时任务的 tenantId）
+          const completedTask = await this.waitForTaskCompletion(
               exportTaskId,
-              task.tenantId,
-            );
+            task.tenantId,
+          );
 
             logger.info('导出任务完成', {
               taskId: task.id,
@@ -326,11 +326,11 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
               filePath: completedTask.filePath,
             });
 
-            if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
-              successfulExports.push({
-                task: completedTask,
-                pageId,
-                branchId,
+          if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
+            successfulExports.push({
+              task: completedTask,
+              pageId,
+              branchId,
               });
             } else {
               logger.warn('导出任务未成功完成', {
@@ -467,7 +467,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
         executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
         executionRecord.errorMessage = error.message;
         executionRecord.errorStack = error.stack;
-
+        
         // 发送失败通知邮件
         if (task.recipient.length > 0) {
           try {
@@ -485,7 +485,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
             });
           }
         }
-
+        
         // 保存失败的执行记录
         try {
           const savedRecord = await executionRecord.save();
@@ -567,7 +567,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
         return `${pageId}${separator}branchId=${branchId}`;
       }
       // 否则，假设是页面ID，构建路径格式：/report/{pageId}?branchId={branchId}
-      return `/report/${pageId}?branchId=${branchId}`;
+    return `/report/${pageId}?branchId=${branchId}`;
     }
   }
 
@@ -686,7 +686,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   getTaskStatus(taskId: string, tenantId: string): { isRunning: boolean; nextExecution?: Date } {
     const jobName = `scheduled-task-${taskId}-${tenantId}`;
     const isRunning = this.schedulerRegistry.doesExist('cron', jobName);
-
+    
     let nextExecution: Date | undefined;
     if (isRunning) {
       const job = this.schedulerRegistry.getCronJob(jobName);
