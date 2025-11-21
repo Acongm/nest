@@ -41,7 +41,7 @@ export class CronGenerator {
     switch (frequency) {
       case FrequencyEnum.TEST:
         // 每天执行：0 分 时 * * *
-        return `1 * * * * *`;
+        return `0 1 * * * *`;
       case FrequencyEnum.DAILY:
         // 每天执行：0 分 时 * * *
         return `${second} ${min} ${hr} * * *`;

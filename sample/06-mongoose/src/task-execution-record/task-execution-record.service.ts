@@ -37,14 +37,33 @@ export class TaskExecutionRecordService {
    * 获取租户的所有执行记录
    * @param tenantId 租户ID
    * @param limit 限制返回数量，默认100
+   * @param taskId 任务ID过滤（可选）
+   * @param status 执行状态过滤（可选）
+   * @param emailStatus 邮件发送状态过滤（可选）
    * @returns 执行记录列表
    */
   async findByTenantId(
     tenantId: string,
     limit: number = 100,
+    taskId?: string,
+    status?: 'success' | 'failed',
+    emailStatus?: 'success' | 'failed' | 'not_sent',
   ): Promise<TaskExecutionRecord[]> {
+    const query: any = { tenantId };
+
+    // 添加可选过滤条件
+    if (taskId) {
+      query.taskId = taskId;
+    }
+    if (status) {
+      query.status = status;
+    }
+    if (emailStatus) {
+      query.emailStatus = emailStatus;
+    }
+
     const records = await this.executionRecordModel
-      .find({ tenantId })
+      .find(query)
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();

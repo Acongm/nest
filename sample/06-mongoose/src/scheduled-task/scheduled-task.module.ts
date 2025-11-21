@@ -8,7 +8,7 @@ import { ScheduledTaskEmailService } from './scheduled-task-email.service';
 import { ScheduledTask, ScheduledTaskSchema } from './schemas/scheduled-task.schema';
 import { ReportExportModule } from '../report-export/report-export.module';
 import { TaskExecutionRecordModule } from '../task-execution-record/task-execution-record.module';
-import { EmailService } from '../common/email.service';
+import { CommonModule } from '../common/common.module';
 
 /**
  * 定时任务模块
@@ -23,12 +23,12 @@ import { EmailService } from '../common/email.service';
     ScheduleModule.forRoot(),
     forwardRef(() => ReportExportModule),
     TaskExecutionRecordModule,
+    CommonModule,
   ],
   providers: [
     ScheduledTaskService,
     ScheduledTaskSchedulerService,
     ScheduledTaskEmailService,
-    EmailService,
   ],
   controllers: [ScheduledTaskController],
   exports: [ScheduledTaskService, ScheduledTaskSchedulerService],

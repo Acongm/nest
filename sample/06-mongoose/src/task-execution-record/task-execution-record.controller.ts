@@ -4,6 +4,8 @@ import { TaskExecutionRecordService } from './task-execution-record.service';
 import { TaskExecutionRecord } from './schemas/task-execution-record.schema';
 import { isCurrentUserData } from '../auth/decorators/current-user.decorator';
 import { logger } from '../common/logger';
+import { QueryExecutionRecordsDto } from './dto/query-execution-records.dto';
+import { TaskExecutionRecordListResponseDto, TaskExecutionRecordResponseDto } from './dto/execution-record-response.dto';
 
 /**
  * 定时任务执行记录控制器
@@ -18,24 +20,24 @@ export class TaskExecutionRecordController {
    * 获取指定任务的所有执行记录
    * @route GET /scheduled-tasks/execution-records/task/:taskId
    * @param taskId 任务ID
-   * @param limit 限制返回数量
+   * @param queryDto 查询参数
    * @returns 执行记录列表
    */
   @Get('task/:taskId')
   async findByTaskId(
     @Req() reqRequest: Request,
     @Param('taskId') taskId: string,
-    @Query('limit') limit?: string,
-  ): Promise<{ records: TaskExecutionRecord[]; recordsCount: number }> {
+    @Query() queryDto: QueryExecutionRecordsDto,
+  ): Promise<TaskExecutionRecordListResponseDto> {
     if (!isCurrentUserData(reqRequest.user)) {
       throw new Error('用户未认证');
     }
     const tenantId = reqRequest.user.tenantId;
 
-    const limitNum = limit ? parseInt(limit, 10) : 50;
+    const limitNum = queryDto.limit || 50;
     const records = await this.executionRecordService.findByTaskId(taskId, tenantId, limitNum);
     return {
-      records,
+      records: records as any,
       recordsCount: records.length,
     };
   }
@@ -43,14 +45,14 @@ export class TaskExecutionRecordController {
   /**
    * 获取租户的所有执行记录
    * @route GET /scheduled-tasks/execution-records
-   * @param limit 限制返回数量
+   * @param queryDto 查询参数
    * @returns 执行记录列表
    */
   @Get()
   async findAll(
     @Req() reqRequest: Request,
-    @Query('limit') limit?: string,
-  ): Promise<{ records: TaskExecutionRecord[]; recordsCount: number }> {
+    @Query() queryDto: QueryExecutionRecordsDto,
+  ): Promise<TaskExecutionRecordListResponseDto> {
     // 检查用户认证
     if (!isCurrentUserData(reqRequest.user)) {
       logger.warn('查询执行记录失败：用户未认证', {
@@ -63,12 +65,21 @@ export class TaskExecutionRecordController {
 
     logger.info('查询执行记录', {
       tenantId,
-      limit,
+      limit: queryDto.limit,
+      taskId: queryDto.taskId,
+      status: queryDto.status,
+      emailStatus: queryDto.emailStatus,
       userId: reqRequest.user.userId,
     });
 
-    const limitNum = limit ? parseInt(limit, 10) : 100;
-    const records = await this.executionRecordService.findByTenantId(tenantId, limitNum);
+    const limitNum = queryDto.limit || 100;
+    const records = await this.executionRecordService.findByTenantId(
+      tenantId,
+      limitNum,
+      queryDto.taskId,
+      queryDto.status,
+      queryDto.emailStatus,
+    );
     
     logger.info('执行记录查询完成', {
       tenantId,
@@ -76,7 +87,7 @@ export class TaskExecutionRecordController {
     });
     
     return {
-      records,
+      records: records as any,
       recordsCount: records.length,
     };
   }
@@ -85,19 +96,19 @@ export class TaskExecutionRecordController {
    * 调试接口：获取所有执行记录（不按租户过滤）
    * 注意：此路由必须在 @Get(':id') 之前，否则会被当作 :id 处理
    * @route GET /scheduled-tasks/execution-records/debug/all
-   * @param limit 限制返回数量
+   * @param queryDto 查询参数
    * @returns 所有执行记录列表
    */
   @Get('debug/all')
   async findAllDebug(
     @Req() reqRequest: Request,
-    @Query('limit') limit?: string,
-  ): Promise<{ records: TaskExecutionRecord[]; recordsCount: number; userTenantId?: string }> {
+    @Query() queryDto: QueryExecutionRecordsDto,
+  ): Promise<TaskExecutionRecordListResponseDto> {
     if (!isCurrentUserData(reqRequest.user)) {
       throw new Error('用户未认证，请先登录');
     }
     
-    const limitNum = limit ? parseInt(limit, 10) : 100;
+    const limitNum = queryDto.limit || 100;
     const records = await this.executionRecordService.findAll(limitNum);
     
     logger.info('调试查询：获取所有执行记录', {
@@ -106,7 +117,7 @@ export class TaskExecutionRecordController {
     });
     
     return {
-      records,
+      records: records as any,
       recordsCount: records.length,
       userTenantId: reqRequest.user.tenantId,
     };
@@ -122,7 +133,7 @@ export class TaskExecutionRecordController {
   async findById(
     @Req() reqRequest: Request,
     @Param('id') id: string,
-  ): Promise<TaskExecutionRecord> {
+  ): Promise<TaskExecutionRecordResponseDto> {
     if (!isCurrentUserData(reqRequest.user)) {
       throw new Error('用户未认证');
     }
@@ -132,7 +143,7 @@ export class TaskExecutionRecordController {
     if (!record) {
       throw new Error('执行记录不存在');
     }
-    return record;
+    return record as any;
   }
 }
 

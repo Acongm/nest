@@ -6,6 +6,7 @@ import { CatsModule } from './cats/cats.module';
 import { ScheduledTaskModule } from './scheduled-task/scheduled-task.module';
 import { ReportExportModule } from './report-export/report-export.module';
 import { AuthModule } from './auth/auth.module';
+import { CommonModule } from './common/common.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
@@ -25,6 +26,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
       }),
       inject: [ConfigService],
     }),
+    CommonModule,
     AuthModule,
     CatsModule,
     ScheduledTaskModule,
