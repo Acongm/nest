@@ -7,6 +7,7 @@ import { ScheduledTaskModule } from './scheduled-task/scheduled-task.module';
 import { ReportExportModule } from './report-export/report-export.module';
 import { AuthModule } from './auth/auth.module';
 import { CommonModule } from './common/common.module';
+import { TaskExecutionRecordModule } from './task-execution-record/task-execution-record.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
@@ -31,6 +32,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     CatsModule,
     ScheduledTaskModule,
     ReportExportModule,
+    TaskExecutionRecordModule,
   ],
   providers: [
     {

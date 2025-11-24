@@ -32,7 +32,7 @@ export class ScheduledTaskEmailService {
     successfulExports: Array<{
       task: any;
       pageId: string;
-      branchId: string;
+      branchId?: string;
     }>,
   ): Promise<{ success: boolean; error?: string; attachments: Array<{ filename: string; path: string; absolutePath: string }> }> {
     logger.info('开始发送报表邮件', {

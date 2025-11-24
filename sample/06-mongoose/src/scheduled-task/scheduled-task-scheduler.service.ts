@@ -186,362 +186,419 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
 
     try {
       // 创建执行记录
-      executionRecord = new this.executionRecordModel({
-        taskId: task.id,
-        tenantId: task.tenantId,
-        status: 'success',
-        startTime: executionStartTime,
-        emailStatus: 'not_sent',
-        recipients: task.recipient,
-        totalExports: 0,
-        successfulExports: 0,
-        emailAttachments: [],
-      });
-      
-      const initialRecord = await executionRecord.save();
-      logger.info('执行记录创建成功', {
-        taskId: task.id,
-        recordId: initialRecord._id?.toString(),
-        tenantId: task.tenantId,
-      });
+      executionRecord = await this.createExecutionRecord(task, executionStartTime);
 
-      // 计算时间范围（根据频率计算开始和结束时间）
+      // 计算时间范围
       const { startTime, endTime } = this.calculateTimeRange(task.frequency);
 
-      // 检查 pageIds 和 branchIds 是否为空
-      if (!task.pageIds || task.pageIds.length === 0) {
-        logger.warn('定时任务没有配置 pageIds，跳过导出任务创建', {
-          taskId: task.id,
-          pageIds: task.pageIds,
-        });
-      }
-
-      // 为每个 pageId 和 branchId 组合创建导出任务
-      const exportTasks = [];
-
-      logger.info('开始创建导出任务', {
-        taskId: task.id,
-        pageIds: task.pageIds,
-        branchIds: task.branchIds,
-        pageIdsLength: task.pageIds?.length || 0,
-        branchIdsLength: task.branchIds?.length || 0,
-        tenantId: task.tenantId,
-        timeRange: {
-          startTime: startTime.toISOString(),
-          endTime: endTime.toISOString(),
-        },
-      });
-
-      for (const pageId of task.pageIds) {
-        // 构建报表页面URL（不包含 branchId，因为会在 createExportTask 中为每个 branchId 添加）
-        // 如果 pageId 是完整 URL，直接使用；如果是路径，构建基础路径
-        let reportPage: string;
-        try {
-          const url = new URL(pageId);
-          reportPage = url.pathname + (url.search || '');
-        } catch {
-          // 如果 pageId 是路径格式（以 / 开头），直接使用
-          if (pageId.startsWith('/')) {
-            reportPage = pageId;
-          } else {
-            // 否则，假设是页面ID，构建路径格式：/report/{pageId}
-            reportPage = `/report/${pageId}`;
-          }
-        }
-        
-        logger.info('创建导出任务', {
-          taskId: task.id,
-          pageId,
-          branchIds: task.branchIds,
-          branchIdsCount: task.branchIds?.length || 0,
-          reportPage,
-        });
-
-        try {
-          // 创建导出任务
-          // 如果 branchIds 有值，传入 branchIds 数组；否则传入空数组，会创建单个任务
-          const exportTaskResult = await this.reportExportService.createExportTask(
-            {
-              startTime: startTime.toISOString(),
-              endTime: endTime.toISOString(),
-              branchIds: task.branchIds && task.branchIds.length > 0 ? task.branchIds : undefined, // 如果为空数组，传 undefined
-              reportPage,
-              taskName: `定时任务-${task.id}`,
-            },
-            task.tenantId,
-          );
-
-          // createExportTask 返回数组（当传入 branchIds 时）或单个任务
-          const createdTasks: any[] = Array.isArray(exportTaskResult) ? exportTaskResult : [exportTaskResult];
-
-          logger.info('导出任务创建成功', {
-            taskId: task.id,
-            pageId,
-            branchIds: task.branchIds,
-            branchIdsCount: task.branchIds?.length || 0,
-            reportPage,
-            tasksCount: createdTasks.length,
-            taskIds: createdTasks.map((t: any) => t._id.toString()),
-          });
-
-          // 为每个创建的任务添加到等待列表
-          for (let i = 0; i < createdTasks.length; i++) {
-            const exportTask = createdTasks[i];
-            // 如果 branchIds 有值，使用对应的 branchId；否则使用 undefined
-            const branchId = task.branchIds && task.branchIds.length > 0 ? task.branchIds[i] : undefined;
-
-          exportTasks.push({
-              exportTask: Promise.resolve(exportTask),
-              pageId,
-              branchId, // 保存对应的 branchId（可能为 undefined）
-            });
-          }
-        } catch (createError: any) {
-          logger.error('创建导出任务失败', {
-            taskId: task.id,
-            pageId,
-            branchIds: task.branchIds,
-            reportPage,
-            error: createError.message,
-            stack: createError.stack,
-          });
-          // 即使创建失败，也继续处理其他任务
-        }
-      }
-
-      // 更新总导出任务数
-      executionRecord.totalExports = exportTasks.length;
-      await executionRecord.save();
-
-      // 等待所有导出任务创建完成
-      const results = await Promise.allSettled(
-        exportTasks.map(({ exportTask }) => exportTask),
+      // 创建并等待导出任务完成（串行执行，避免内存压力）
+      const successfulExports = await this.createAndWaitForExportTasks(
+        task,
+        startTime,
+        endTime,
+        executionRecord,
       );
-
-      logger.info('导出任务创建完成', {
-        taskId: task.id,
-        totalTasks: exportTasks.length,
-        fulfilled: results.filter(r => r.status === 'fulfilled').length,
-        rejected: results.filter(r => r.status === 'rejected').length,
-      });
-
-      // 收集成功的导出任务
-      const successfulExports = [];
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const { pageId, branchId } = exportTasks[i];
-        
-        if (result.status === 'fulfilled') {
-          const exportTask = result.value;
-          const exportTaskId = exportTask._id.toString();
-          
-          logger.info('开始等待导出任务完成', {
-            taskId: task.id,
-            exportTaskId,
-            pageId,
-            branchId,
-          });
-
-          try {
-          // 等待任务完成（使用定时任务的 tenantId）
-          const completedTask = await this.waitForTaskCompletion(
-              exportTaskId,
-            task.tenantId,
-          );
-
-            logger.info('导出任务完成', {
-              taskId: task.id,
-              exportTaskId,
-              pageId,
-              branchId,
-              status: completedTask.status,
-              filePath: completedTask.filePath,
-            });
-
-          if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
-            successfulExports.push({
-              task: completedTask,
-              pageId,
-              branchId,
-              });
-            } else {
-              logger.warn('导出任务未成功完成', {
-                taskId: task.id,
-                exportTaskId,
-                pageId,
-                branchId,
-                status: completedTask.status,
-                errorMessage: completedTask.errorMessage,
-              });
-            }
-          } catch (waitError: any) {
-            logger.error('等待导出任务完成失败', {
-              taskId: task.id,
-              exportTaskId,
-              pageId,
-              branchId,
-              error: waitError.message,
-              stack: waitError.stack,
-            });
-          }
-        } else {
-          logger.error('导出任务创建失败', {
-            taskId: task.id,
-            pageId,
-            branchId,
-            error: result.reason?.message,
-            stack: result.reason?.stack,
-          });
-        }
-      }
-
-      logger.info('所有导出任务处理完成', {
-        taskId: task.id,
-        totalTasks: exportTasks.length,
-        successfulExports: successfulExports.length,
-      });
 
       // 更新成功导出的任务数
       executionRecord.successfulExports = successfulExports.length;
       await executionRecord.save();
 
-      // 发送邮件（如果有成功的导出）
-      let emailResult: { success: boolean; error?: string; attachments: Array<{ filename: string; path: string }> } | null = null;
-      if (successfulExports.length > 0 && task.recipient.length > 0) {
-        try {
-          emailResult = await this.emailService.sendReportEmails(task, successfulExports);
-          if (emailResult.success) {
-            executionRecord.emailStatus = 'success';
-            executionRecord.emailAttachments = emailResult.attachments.map(att => ({
-              filename: att.filename,
-              path: att.path,
-            }));
-            logger.info('邮件发送成功，更新执行记录', {
-              taskId: task.id,
-              attachmentsCount: emailResult.attachments.length,
-            });
-          } else {
-            executionRecord.emailStatus = 'failed';
-            executionRecord.emailErrorMessage = emailResult.error;
-            logger.warn('邮件发送失败，更新执行记录', {
-              taskId: task.id,
-              error: emailResult.error,
-            });
-          }
-        } catch (emailError) {
-          executionRecord.emailStatus = 'failed';
-          executionRecord.emailErrorMessage = emailError.message;
-          logger.error('发送邮件异常', {
-            taskId: task.id,
-            error: emailError.message,
-            stack: emailError.stack,
-          });
-        }
-      } else if (task.recipient.length === 0) {
-        executionRecord.emailStatus = 'not_sent';
-        logger.info('未配置收件人，邮件状态设为未发送', {
-          taskId: task.id,
-        });
-      } else if (successfulExports.length === 0) {
-        executionRecord.emailStatus = 'not_sent';
-        logger.info('没有成功的导出，邮件状态设为未发送', {
-          taskId: task.id,
-        });
-      }
+      // 发送邮件
+      await this.sendReportEmails(task, successfulExports, executionRecord);
 
-      // 更新执行记录为成功
-      const executionEndTime = new Date();
-      executionRecord.status = 'success';
-      executionRecord.endTime = executionEndTime;
-      executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
-
-      // 保存执行记录，并记录详细信息
-      try {
-        const savedRecord = await executionRecord.save();
-        logger.info('执行记录保存成功', {
-          taskId: task.id,
-          recordId: savedRecord._id?.toString(),
-          tenantId: savedRecord.tenantId,
-          status: savedRecord.status,
-          emailStatus: savedRecord.emailStatus,
-          totalExports: savedRecord.totalExports,
-          successfulExports: savedRecord.successfulExports,
-          duration: savedRecord.duration,
-        });
-      } catch (saveError) {
-        logger.error('执行记录保存失败', {
-          taskId: task.id,
-          error: saveError.message,
-          stack: saveError.stack,
-        });
-        // 即使保存失败，也不抛出错误，避免影响主流程
-      }
+      // 保存执行记录为成功
+      await this.saveExecutionRecordSuccess(executionRecord, executionStartTime, task);
 
       logger.info('定时任务执行完成', {
         taskId: task.id,
         tenantId: task.tenantId,
-        totalExports: exportTasks.length,
+        totalExports: executionRecord.totalExports,
         successfulExports: successfulExports.length,
         emailStatus: executionRecord.emailStatus,
       });
     } catch (error) {
-      logger.error('定时任务执行异常', {
+      await this.handleExecutionError(task, executionRecord, executionStartTime, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 创建执行记录
+   */
+  private async createExecutionRecord(
+    task: ScheduledTask,
+    startTime: Date,
+  ): Promise<TaskExecutionRecordDocument> {
+    const executionRecord = new this.executionRecordModel({
+      taskId: task.id,
+      tenantId: task.tenantId,
+      status: 'success',
+      startTime,
+      emailStatus: 'not_sent',
+      recipients: task.recipient,
+      totalExports: 0,
+      successfulExports: 0,
+      emailAttachments: [],
+    });
+
+    const savedRecord = await executionRecord.save();
+    logger.info('执行记录创建成功', {
+      taskId: task.id,
+      recordId: savedRecord._id?.toString(),
+      tenantId: task.tenantId,
+    });
+
+    return savedRecord;
+  }
+
+  /**
+   * 构建报表页面路径
+   */
+  private buildReportPagePath(pageId: string): string {
+    try {
+      const url = new URL(pageId);
+      return url.pathname + (url.search || '');
+    } catch {
+      if (pageId.startsWith('/')) {
+        return pageId;
+      }
+      return `/report/${pageId}`;
+    }
+  }
+
+  /**
+   * 为单个页面创建导出任务
+   */
+  private async createExportTasksForPage(
+    task: ScheduledTask,
+    pageId: string,
+    startTime: Date,
+    endTime: Date,
+  ): Promise<Array<{ exportTask: any; pageId: string; branchId?: string }>> {
+    const reportPage = this.buildReportPagePath(pageId);
+
+    logger.info('创建导出任务', {
+      taskId: task.id,
+      pageId,
+      branchIds: task.branchIds,
+      branchIdsCount: task.branchIds?.length || 0,
+      reportPage,
+    });
+
+    try {
+      const exportTaskResult = await this.reportExportService.createExportTask(
+        {
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString(),
+          branchIds: task.branchIds && task.branchIds.length > 0 ? task.branchIds : undefined,
+          reportPage,
+          taskName: `定时任务-${task.id}`,
+        },
+        task.tenantId,
+      );
+
+      const createdTasks: any[] = Array.isArray(exportTaskResult) ? exportTaskResult : [exportTaskResult];
+
+      logger.info('导出任务创建成功', {
         taskId: task.id,
-        error: error.message,
-        stack: error.stack,
+        pageId,
+        branchIds: task.branchIds,
+        branchIdsCount: task.branchIds?.length || 0,
+        reportPage,
+        tasksCount: createdTasks.length,
+        taskIds: createdTasks.map((t: any) => t._id.toString()),
       });
 
-      // 更新执行记录为失败
-      if (executionRecord) {
-        const executionEndTime = new Date();
-        executionRecord.status = 'failed';
-        executionRecord.endTime = executionEndTime;
-        executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
-        executionRecord.errorMessage = error.message;
-        executionRecord.errorStack = error.stack;
-        
-        // 发送失败通知邮件
-        if (task.recipient.length > 0) {
-          try {
-            await this.emailService.sendFailureNotification(task, error);
-            executionRecord.emailStatus = 'success';
-            logger.info('失败通知邮件发送成功', {
-              taskId: task.id,
-            });
-          } catch (emailError) {
-            executionRecord.emailStatus = 'failed';
-            executionRecord.emailErrorMessage = emailError.message;
-            logger.error('发送失败通知邮件异常', {
-              taskId: task.id,
-              error: emailError.message,
-            });
-          }
-        }
-        
-        // 保存失败的执行记录
-        try {
-          const savedRecord = await executionRecord.save();
-          logger.info('失败执行记录保存成功', {
-            taskId: task.id,
-            recordId: savedRecord._id?.toString(),
-            tenantId: savedRecord.tenantId,
-            status: savedRecord.status,
-            errorMessage: savedRecord.errorMessage,
-          });
-        } catch (saveError) {
-          logger.error('失败执行记录保存失败', {
-            taskId: task.id,
-            error: saveError.message,
-            stack: saveError.stack,
-          });
-        }
+      return createdTasks.map((exportTask, i) => ({
+        exportTask: Promise.resolve(exportTask),
+        pageId,
+        branchId: task.branchIds && task.branchIds.length > 0 ? task.branchIds[i] : undefined,
+      }));
+    } catch (createError: any) {
+      logger.error('创建导出任务失败', {
+        taskId: task.id,
+        pageId,
+        branchIds: task.branchIds,
+        reportPage,
+        error: createError.message,
+        stack: createError.stack,
+      });
+      return [];
+    }
+  }
+
+  /**
+   * 等待单个导出任务完成
+   */
+  private async waitForSingleExportTask(
+    task: ScheduledTask,
+    exportTaskId: string,
+    pageId: string,
+    branchId?: string,
+  ): Promise<{ task: any; pageId: string; branchId?: string } | null> {
+    logger.info('开始等待导出任务完成', {
+      taskId: task.id,
+      exportTaskId,
+      pageId,
+      branchId,
+    });
+
+    try {
+      const completedTask = await this.waitForTaskCompletion(exportTaskId, task.tenantId);
+
+      logger.info('导出任务完成', {
+        taskId: task.id,
+        exportTaskId,
+        pageId,
+        branchId,
+        status: completedTask.status,
+        filePath: completedTask.filePath,
+      });
+
+      if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
+        return {
+          task: completedTask,
+          pageId,
+          branchId,
+        };
       } else {
-        logger.warn('执行记录未创建，无法保存失败信息', {
+        logger.warn('导出任务未成功完成', {
           taskId: task.id,
+          exportTaskId,
+          pageId,
+          branchId,
+          status: completedTask.status,
+          errorMessage: completedTask.errorMessage,
+        });
+        return null;
+      }
+    } catch (waitError: any) {
+      logger.error('等待导出任务完成失败', {
+        taskId: task.id,
+        exportTaskId,
+        pageId,
+        branchId,
+        error: waitError.message,
+        stack: waitError.stack,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * 创建并等待所有导出任务完成（串行执行）
+   */
+  private async createAndWaitForExportTasks(
+    task: ScheduledTask,
+    startTime: Date,
+    endTime: Date,
+    executionRecord: TaskExecutionRecordDocument,
+  ): Promise<Array<{ task: any; pageId: string; branchId?: string }>> {
+    if (!task.pageIds || task.pageIds.length === 0) {
+      logger.warn('定时任务没有配置 pageIds，跳过导出任务创建', {
+        taskId: task.id,
+        pageIds: task.pageIds,
+      });
+      return [];
+    }
+
+    logger.info('开始创建导出任务', {
+      taskId: task.id,
+      pageIds: task.pageIds,
+      branchIds: task.branchIds,
+      pageIdsLength: task.pageIds.length,
+      branchIdsLength: task.branchIds?.length || 0,
+      tenantId: task.tenantId,
+      timeRange: {
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+      },
+    });
+
+    const successfulExports: Array<{ task: any; pageId: string; branchId?: string }> = [];
+
+    // 串行处理每个 pageId，避免并发过多导致内存压力
+    for (const pageId of task.pageIds) {
+      // 为当前 pageId 创建导出任务
+      const exportTasks = await this.createExportTasksForPage(task, pageId, startTime, endTime);
+
+      // 更新总导出任务数
+      executionRecord.totalExports += exportTasks.length;
+      await executionRecord.save();
+
+      // 串行等待每个导出任务完成
+      for (const { exportTask, pageId: taskPageId, branchId } of exportTasks) {
+        const resolvedTask = await exportTask;
+        const exportTaskId = resolvedTask._id.toString();
+
+        const result = await this.waitForSingleExportTask(task, exportTaskId, taskPageId, branchId);
+        if (result) {
+          successfulExports.push(result);
+        }
+      }
+    }
+
+    logger.info('所有导出任务处理完成', {
+      taskId: task.id,
+      totalTasks: executionRecord.totalExports,
+      successfulExports: successfulExports.length,
+    });
+
+    return successfulExports;
+  }
+
+  /**
+   * 发送报表邮件
+   */
+  private async sendReportEmails(
+    task: ScheduledTask,
+    successfulExports: Array<{ task: any; pageId: string; branchId?: string }>,
+    executionRecord: TaskExecutionRecordDocument,
+  ): Promise<void> {
+    if (successfulExports.length === 0) {
+      executionRecord.emailStatus = 'not_sent';
+      logger.info('没有成功的导出，邮件状态设为未发送', {
+        taskId: task.id,
+      });
+      return;
+    }
+
+    if (task.recipient.length === 0) {
+      executionRecord.emailStatus = 'not_sent';
+      logger.info('未配置收件人，邮件状态设为未发送', {
+        taskId: task.id,
+      });
+      return;
+    }
+
+    try {
+      const emailResult = await this.emailService.sendReportEmails(task, successfulExports);
+      if (emailResult.success) {
+        executionRecord.emailStatus = 'success';
+        executionRecord.emailAttachments = emailResult.attachments.map(att => ({
+          filename: att.filename,
+          path: att.path,
+        }));
+        logger.info('邮件发送成功，更新执行记录', {
+          taskId: task.id,
+          attachmentsCount: emailResult.attachments.length,
+        });
+      } else {
+        executionRecord.emailStatus = 'failed';
+        executionRecord.emailErrorMessage = emailResult.error;
+        logger.warn('邮件发送失败，更新执行记录', {
+          taskId: task.id,
+          error: emailResult.error,
         });
       }
+    } catch (emailError) {
+      executionRecord.emailStatus = 'failed';
+      executionRecord.emailErrorMessage = emailError.message;
+      logger.error('发送邮件异常', {
+        taskId: task.id,
+        error: emailError.message,
+        stack: emailError.stack,
+      });
+    }
+  }
 
-      throw error;
+  /**
+   * 保存执行记录为成功状态
+   */
+  private async saveExecutionRecordSuccess(
+    executionRecord: TaskExecutionRecordDocument,
+    executionStartTime: Date,
+    task: ScheduledTask,
+  ): Promise<void> {
+    const executionEndTime = new Date();
+    executionRecord.status = 'success';
+    executionRecord.endTime = executionEndTime;
+    executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
+
+    try {
+      const savedRecord = await executionRecord.save();
+      logger.info('执行记录保存成功', {
+        taskId: task.id,
+        recordId: savedRecord._id?.toString(),
+        tenantId: savedRecord.tenantId,
+        status: savedRecord.status,
+        emailStatus: savedRecord.emailStatus,
+        totalExports: savedRecord.totalExports,
+        successfulExports: savedRecord.successfulExports,
+        duration: savedRecord.duration,
+      });
+    } catch (saveError) {
+      logger.error('执行记录保存失败', {
+        taskId: task.id,
+        error: saveError.message,
+        stack: saveError.stack,
+      });
+    }
+  }
+
+  /**
+   * 处理执行错误
+   */
+  private async handleExecutionError(
+    task: ScheduledTask,
+    executionRecord: TaskExecutionRecordDocument | null,
+    executionStartTime: Date,
+    error: any,
+  ): Promise<void> {
+    logger.error('定时任务执行异常', {
+      taskId: task.id,
+      error: error.message,
+      stack: error.stack,
+    });
+
+    if (!executionRecord) {
+      logger.warn('执行记录未创建，无法保存失败信息', {
+        taskId: task.id,
+      });
+      return;
+    }
+
+    const executionEndTime = new Date();
+    executionRecord.status = 'failed';
+    executionRecord.endTime = executionEndTime;
+    executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
+    executionRecord.errorMessage = error.message;
+    executionRecord.errorStack = error.stack;
+
+    // 发送失败通知邮件
+    if (task.recipient.length > 0) {
+      try {
+        await this.emailService.sendFailureNotification(task, error);
+        executionRecord.emailStatus = 'success';
+        logger.info('失败通知邮件发送成功', {
+          taskId: task.id,
+        });
+      } catch (emailError) {
+        executionRecord.emailStatus = 'failed';
+        executionRecord.emailErrorMessage = emailError.message;
+        logger.error('发送失败通知邮件异常', {
+          taskId: task.id,
+          error: emailError.message,
+        });
+      }
+    }
+
+    // 保存失败的执行记录
+    try {
+      const savedRecord = await executionRecord.save();
+      logger.info('失败执行记录保存成功', {
+        taskId: task.id,
+        recordId: savedRecord._id?.toString(),
+        tenantId: savedRecord.tenantId,
+        status: savedRecord.status,
+        errorMessage: savedRecord.errorMessage,
+      });
+    } catch (saveError) {
+      logger.error('失败执行记录保存失败', {
+        taskId: task.id,
+        error: saveError.message,
+        stack: saveError.stack,
+      });
     }
   }
 

@@ -322,115 +322,200 @@ export class ReportExportService {
         workerPath: this.workerPath,
       });
 
-      // 准备 spawn 参数
-      const isTsFile = this.workerPath.endsWith('.ts');
-      const nodeExecutable = process.execPath; // Node.js 可执行文件路径
-      const args = isTsFile
-        ? ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', this.workerPath]
-        : [this.workerPath];
+      const worker = this.spawnWorkerProcess();
+      const timeout = this.setupWorkerTimeout(worker, taskId, reject);
+      const dataCollectors = this.setupWorkerDataCollectors(worker, taskId);
 
-      // 使用 spawn 启动子进程
-      const worker: ChildProcess = spawn(nodeExecutable, args, {
-        stdio: ['pipe', 'pipe', 'pipe'], // stdin, stdout, stderr
-        env: {
-          ...process.env,
-          NODE_ENV: process.env.NODE_ENV || 'development',
-        },
-      });
-
-      // 设置超时
-      const timeout = setTimeout(() => {
-        logger.error('Worker 进程超时', { taskId });
-        worker.kill('SIGTERM');
-        reject(new Error(`Worker 进程超时（${this.TASK_TIMEOUT / 1000}秒）`));
-      }, this.TASK_TIMEOUT);
-
-      let stdoutData = '';
-      let stderrData = '';
-
-      // 收集 stdout 数据
-      worker.stdout?.on('data', (data: Buffer) => {
-        stdoutData += data.toString();
-      });
-
-      // 收集 stderr 数据（可能包含日志输出）
-      worker.stderr?.on('data', (data: Buffer) => {
-        stderrData += data.toString();
-        // stderr 可能包含 winston 的日志输出，记录但不作为错误
-        logger.debug('Worker stderr', { taskId, data: data.toString() });
-      });
-
-      // 监听进程退出
-      worker.on('exit', (code, signal) => {
-        clearTimeout(timeout);
-
-        if (code === 0) {
-          try {
-            // 解析 JSON 输出（取最后一行，因为可能有日志输出）
-            const lines = stdoutData.trim().split('\n');
-            const lastLine = lines[lines.length - 1];
-            const result = JSON.parse(lastLine);
-
-            if (result.type === 'success') {
-              logger.info('Worker 进程完成', {
-                taskId,
-                filePath: result.filePath,
-              });
-              resolve(result.filePath);
-            } else if (result.type === 'error') {
-              logger.error('Worker 进程失败', {
-                taskId,
-                error: result.error,
-              });
-              reject(new Error(result.error || 'PDF 导出失败'));
-            } else {
-              reject(new Error('未知的响应类型'));
-            }
-          } catch (error) {
-            logger.error('解析 Worker 输出失败', {
-              taskId,
-              error: error.message,
-              stdout: stdoutData,
-            });
-            reject(new Error(`解析 Worker 输出失败: ${error.message}`));
-          }
-        } else {
-          logger.error('Worker 进程异常退出', {
-            taskId,
-            code,
-            signal,
-            stderr: stderrData,
-          });
-          reject(
-            new Error(
-              `Worker 进程异常退出，退出码: ${code}，错误: ${stderrData}`,
-            ),
-          );
-        }
-      });
-
-      // 监听进程错误
-      worker.on('error', (error) => {
-        clearTimeout(timeout);
-        logger.error('Worker 进程错误', {
-          taskId,
-          error: error.message,
-          stack: error.stack,
-        });
-        reject(error);
-      });
-
-      // 通过 stdin 发送任务数据
-      const taskData = JSON.stringify({
-        type: 'export-pdf',
+      this.setupWorkerExitHandler(
+        worker,
+        timeout,
+        dataCollectors,
         taskId,
-        url,
-        uploadDir: this.UPLOAD_DIR,
-      });
-
-      worker.stdin?.write(taskData + '\n');
-      worker.stdin?.end();
+        resolve,
+        reject,
+      );
+      this.setupWorkerErrorHandler(worker, timeout, taskId, reject);
+      this.sendTaskDataToWorker(worker, taskId, url);
     });
+  }
+
+  /**
+   * 启动 Worker 子进程
+   */
+  private spawnWorkerProcess(): ChildProcess {
+    const isTsFile = this.workerPath.endsWith('.ts');
+    const nodeExecutable = process.execPath;
+    const args = isTsFile
+      ? ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', this.workerPath]
+      : [this.workerPath];
+
+    return spawn(nodeExecutable, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        NODE_ENV: process.env.NODE_ENV || 'development',
+      },
+    });
+  }
+
+  /**
+   * 设置 Worker 超时
+   */
+  private setupWorkerTimeout(
+    worker: ChildProcess,
+    taskId: string,
+    reject: (reason: any) => void,
+  ): NodeJS.Timeout {
+    return setTimeout(() => {
+      logger.error('Worker 进程超时', { taskId });
+      worker.kill('SIGTERM');
+      reject(new Error(`Worker 进程超时（${this.TASK_TIMEOUT / 1000}秒）`));
+    }, this.TASK_TIMEOUT);
+  }
+
+  /**
+   * 设置 Worker 数据收集器
+   */
+  private setupWorkerDataCollectors(
+    worker: ChildProcess,
+    taskId: string,
+  ): { stdoutData: string; stderrData: string } {
+    const dataCollectors = {
+      stdoutData: '',
+      stderrData: '',
+    };
+
+    worker.stdout?.on('data', (data: Buffer) => {
+      dataCollectors.stdoutData += data.toString();
+    });
+
+    worker.stderr?.on('data', (data: Buffer) => {
+      dataCollectors.stderrData += data.toString();
+      logger.debug('Worker stderr', { taskId, data: data.toString() });
+    });
+
+    return dataCollectors;
+  }
+
+  /**
+   * 设置 Worker 退出处理器
+   */
+  private setupWorkerExitHandler(
+    worker: ChildProcess,
+    timeout: NodeJS.Timeout,
+    dataCollectors: { stdoutData: string; stderrData: string },
+    taskId: string,
+    resolve: (value: string) => void,
+    reject: (reason: any) => void,
+  ): void {
+    worker.on('exit', (code, signal) => {
+      clearTimeout(timeout);
+
+      if (code === 0) {
+        this.handleWorkerSuccess(dataCollectors.stdoutData, taskId, resolve, reject);
+      } else {
+        this.handleWorkerFailure(code, signal, dataCollectors.stderrData, taskId, reject);
+      }
+    });
+  }
+
+  /**
+   * 处理 Worker 成功退出
+   */
+  private handleWorkerSuccess(
+    stdoutData: string,
+    taskId: string,
+    resolve: (value: string) => void,
+    reject: (reason: any) => void,
+  ): void {
+    try {
+      const lines = stdoutData.trim().split('\n');
+      const lastLine = lines[lines.length - 1];
+      const result = JSON.parse(lastLine);
+
+      if (result.type === 'success') {
+        logger.info('Worker 进程完成', {
+          taskId,
+          filePath: result.filePath,
+        });
+        resolve(result.filePath);
+      } else if (result.type === 'error') {
+        logger.error('Worker 进程失败', {
+          taskId,
+          error: result.error,
+        });
+        reject(new Error(result.error || 'PDF 导出失败'));
+      } else {
+        reject(new Error('未知的响应类型'));
+      }
+    } catch (error) {
+      logger.error('解析 Worker 输出失败', {
+        taskId,
+        error: error.message,
+        stdout: stdoutData,
+      });
+      reject(new Error(`解析 Worker 输出失败: ${error.message}`));
+    }
+  }
+
+  /**
+   * 处理 Worker 失败退出
+   */
+  private handleWorkerFailure(
+    code: number | null,
+    signal: string | null,
+    stderrData: string,
+    taskId: string,
+    reject: (reason: any) => void,
+  ): void {
+    logger.error('Worker 进程异常退出', {
+      taskId,
+      code,
+      signal,
+      stderr: stderrData,
+    });
+    reject(
+      new Error(`Worker 进程异常退出，退出码: ${code}，错误: ${stderrData}`),
+    );
+  }
+
+  /**
+   * 设置 Worker 错误处理器
+   */
+  private setupWorkerErrorHandler(
+    worker: ChildProcess,
+    timeout: NodeJS.Timeout,
+    taskId: string,
+    reject: (reason: any) => void,
+  ): void {
+    worker.on('error', (error) => {
+      clearTimeout(timeout);
+      logger.error('Worker 进程错误', {
+        taskId,
+        error: error.message,
+        stack: error.stack,
+      });
+      reject(error);
+    });
+  }
+
+  /**
+   * 向 Worker 发送任务数据
+   */
+  private sendTaskDataToWorker(
+    worker: ChildProcess,
+    taskId: string,
+    url: string,
+  ): void {
+    const taskData = JSON.stringify({
+      type: 'export-pdf',
+      taskId,
+      url,
+      uploadDir: this.UPLOAD_DIR,
+    });
+
+    worker.stdin?.write(taskData + '\n');
+    worker.stdin?.end();
   }
 
   /**
