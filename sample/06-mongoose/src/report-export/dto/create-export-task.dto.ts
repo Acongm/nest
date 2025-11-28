@@ -35,5 +35,10 @@ export class CreateExportTaskDto {
   @IsOptional()
   @IsString()
   taskName?: string;
+
+  /** 时区（IANA 时区标识符，如 Asia/Shanghai） */
+  @IsOptional()
+  @IsString()
+  timezone?: string;
 }
 

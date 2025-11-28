@@ -77,6 +77,10 @@ docker-compose up -d mongodb
 NODE_ENV=development
 MONGODB_URI=mongodb://localhost:27017/test
 JWT_SECRET=your-secret-key-change-in-production
+
+# 定时任务相关配置
+DEFAULT_TIMEZONE=Asia/Shanghai          # 默认时区（IANA 时区标识符）
+EXPORT_RETRY_COUNT=3                    # 导出任务失败时的默认重试次数
 ```
 
 4) 创建必要目录（首次运行）

@@ -54,6 +54,8 @@ export class ReportExportOfficeService {
     tenantId: string,
     format: OfficeFormat,
   ): Promise<{ filePath: string; base64: string }[]> {
+    // 获取时区，使用环境变量中的默认时区
+    const timezone = createDto.timezone || process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
     // 构建需要导出的 assetId 列表（兼容单个 assetId 与多个 branchIds）
     const assetIds =
       createDto.branchIds && createDto.branchIds.length > 0
@@ -68,18 +70,26 @@ export class ReportExportOfficeService {
 
     const results: { filePath: string; base64: string }[] = [];
     for (const assetId of assetIds) {
-      const reportUrl = this.buildReportUrl(createDto.reportPage, {
+      const urlParams: Record<string, string> = {
         startTime: new Date(createDto.startTime).toISOString(),
         endTime: new Date(createDto.endTime).toISOString(),
         assetId,
         tenantId,
-      });
+      };
+      
+      // 如果提供了时区，添加到 URL 参数中
+      if (createDto.timezone) {
+        urlParams.timezone = createDto.timezone;
+      }
+      
+      const reportUrl = this.buildReportUrl(createDto.reportPage, urlParams);
 
       const taskId = `${Date.now()}_${assetId}`;
       const { filePath, base64 } = await this.exportToOfficeViaWorker(
         reportUrl,
         taskId,
         format,
+        timezone,
       );
       results.push({ filePath, base64 });
     }
@@ -99,19 +109,26 @@ export class ReportExportOfficeService {
     throw new Error('找不到 Office Worker 文件');
   }
 
-  private spawnWorkerProcess(): ChildProcess {
+  private spawnWorkerProcess(timezone?: string): ChildProcess {
     const isTsFile = this.workerPath.endsWith('.ts');
     const nodeExecutable = process.execPath;
     const args = isTsFile
       ? ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', this.workerPath]
       : [this.workerPath];
 
+    const env = {
+      ...process.env,
+      NODE_ENV: process.env.NODE_ENV || 'development',
+    };
+
+    // 设置时区环境变量
+    if (timezone) {
+      env.TZ = timezone;
+    }
+
     return spawn(nodeExecutable, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        NODE_ENV: process.env.NODE_ENV || 'development',
-      },
+      env,
     });
   }
 
@@ -119,16 +136,18 @@ export class ReportExportOfficeService {
     url: string,
     taskId: string,
     format: OfficeFormat,
+    timezone?: string,
   ): Promise<{ filePath: string; base64: string }> {
     return new Promise((resolve, reject) => {
       logger.info('启动 Office 导出 Worker 进程（spawn）', {
         taskId,
         url,
         format,
+        timezone,
         workerPath: this.workerPath,
       });
 
-      const worker = this.spawnWorkerProcess();
+      const worker = this.spawnWorkerProcess(timezone);
       const timeout = setTimeout(() => {
         logger.error('Office Worker 进程超时', { taskId });
         worker.kill('SIGTERM');

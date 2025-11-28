@@ -109,6 +109,24 @@ class OfficeExportWorker {
     try {
       logger.info(`开始导出 ${format.toUpperCase()}，任务ID: ${taskId}，URL: ${url}`);
 
+      // 获取时区（从环境变量或 URL 参数）
+      // 优先使用 TZ 环境变量（由 spawn 进程传入），其次使用 DEFAULT_TIMEZONE，最后使用默认值
+      const timezone = process.env.TZ || process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
+      
+      // 从 URL 中提取时区（如果存在）
+      let urlTimezone = timezone;
+      try {
+        const urlObj = new URL(url);
+        const tzParam = urlObj.searchParams.get('timezone');
+        if (tzParam) {
+          urlTimezone = tzParam;
+        }
+      } catch (e) {
+        // URL 解析失败，使用默认时区
+      }
+
+      logger.info(`使用时区: ${urlTimezone}`);
+
       const launchOptions: any = {
         headless: true,
         args: [
@@ -118,10 +136,19 @@ class OfficeExportWorker {
           '--disable-accelerated-2d-canvas',
           '--disable-gpu',
         ],
+        env: {
+          ...process.env,
+          TZ: urlTimezone, // 设置时区环境变量
+        },
       };
 
       browser = await puppeteer.launch(launchOptions);
       const page = await browser.newPage();
+      
+      // 通过 CDP 设置浏览器时区
+      const client = await page.target().createCDPSession();
+      await client.send('Emulation.setTimezoneOverride', { timezoneId: urlTimezone });
+      
       await page.setViewport({ width: 1920, height: 1080 });
       logger.info(`访问页面: ${url}`);
       await page.goto(url, { waitUntil: 'networkidle0', timeout: 60000 });

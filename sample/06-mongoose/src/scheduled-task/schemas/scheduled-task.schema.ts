@@ -66,6 +66,14 @@ export class ScheduledTask {
   @Prop({ required: true, type: String })
   cronExpression: string;
 
+  /** 时区（IANA 时区标识符，如 Asia/Shanghai, America/New_York） */
+  @Prop({ 
+    required: false, 
+    type: String, 
+    default: process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai' 
+  })
+  timezone?: string;
+
   /** 创建时间 */
   @Prop({ type: Date, default: Date.now })
   created: Date;

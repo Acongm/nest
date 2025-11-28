@@ -17,11 +17,15 @@ import { logger } from '../common/logger';
 @Injectable()
 export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+  
   // 从环境变量读取重试次数，默认3次
   private readonly EXPORT_RETRY_COUNT = parseInt(
     process.env.EXPORT_RETRY_COUNT || '3',
     10,
   );
+
+  // 从环境变量读取默认时区，默认为 Asia/Shanghai
+  private readonly DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
 
   constructor(
     @InjectModel(ScheduledTask.name)
@@ -83,6 +87,9 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       logger.info(`删除已存在的定时任务: ${jobName}`);
     }
 
+    // 获取任务的时区配置，使用环境变量中的默认时区
+    const timezone = task.timezone || this.DEFAULT_TIMEZONE;
+
     // 创建新的 Cron 任务
     const job = new CronJob(
       task.cronExpression,
@@ -97,7 +104,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       },
       null, // onComplete
       true, // start
-      'Asia/Shanghai', // timeZone
+      timezone, // 使用任务指定的时区
     );
 
     // 注册任务（使用类型断言解决类型不匹配问题）
@@ -193,8 +200,9 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       // 创建执行记录
       executionRecord = await this.createExecutionRecord(task, executionStartTime);
 
-      // 计算时间范围
-      const { startTime, endTime } = this.calculateTimeRange(task.frequency);
+      // 计算时间范围（按照任务指定的时区）
+      const timezone = task.timezone || this.DEFAULT_TIMEZONE;
+      const { startTime, endTime } = this.calculateTimeRange(task.frequency, timezone);
 
       // 创建并等待导出任务完成（串行执行，避免内存压力）
       const successfulExports = await this.createAndWaitForExportTasks(
@@ -292,6 +300,9 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
     });
 
     try {
+      // 获取任务的时区配置
+      const timezone = task.timezone || this.DEFAULT_TIMEZONE;
+
       const exportTaskResult = await this.reportExportService.createExportTask(
         {
           startTime: startTime.toISOString(),
@@ -299,6 +310,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
           branchIds: task.branchIds && task.branchIds.length > 0 ? task.branchIds : undefined,
           reportPage,
           taskName: `定时任务-${task.id}`,
+          timezone, // 传递时区信息
         },
         task.tenantId,
       );
@@ -811,36 +823,198 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   }
 
   /**
-   * 计算时间范围
-   * @param frequency 频率
+   * 在指定时区获取当前日期时间的各个部分
+   * @param timezone 时区（IANA 时区标识符）
+   * @returns 包含年、月、日、时、分、秒的对象
    */
-  private calculateTimeRange(frequency: string): { startTime: Date; endTime: Date } {
-    const endTime = new Date();
-    endTime.setHours(23, 59, 59, 999); // 今天结束
+  private getCurrentDateTimePartsInTimezone(timezone: string): {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+    second: number;
+  } {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
 
-    let startTime = new Date();
+    const parts = formatter.formatToParts(now);
+    return {
+      year: parseInt(parts.find(p => p.type === 'year')?.value || '0', 10),
+      month: parseInt(parts.find(p => p.type === 'month')?.value || '0', 10),
+      day: parseInt(parts.find(p => p.type === 'day')?.value || '0', 10),
+      hour: parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10),
+      minute: parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10),
+      second: parseInt(parts.find(p => p.type === 'second')?.value || '0', 10),
+    };
+  }
+
+  /**
+   * 在指定时区创建日期对象
+   * 将时区的日期时间转换为 UTC Date 对象
+   * @param year 年
+   * @param month 月（1-12）
+   * @param day 日
+   * @param hour 时
+   * @param minute 分
+   * @param second 秒
+   * @param timezone 时区（IANA 时区标识符）
+   * @returns Date 对象（UTC）
+   */
+  private createDateInTimezone(
+    year: number,
+    month: number,
+    day: number,
+    hour: number,
+    minute: number,
+    second: number,
+    timezone: string,
+  ): Date {
+    // 创建一个参考日期（该时区的日期时间）
+    // 使用一个技巧：创建一个 UTC 日期，然后通过时区偏移调整
+    const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+
+    // 获取该时区在该时间点的偏移
+    // 方法：比较 UTC 时间和时区时间在同一时刻的表示
+    const utcFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+
+    const tzFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+
+    // 获取 UTC 日期在该时区的表示
+    const tzParts = tzFormatter.formatToParts(utcDate);
+    const tzYear = parseInt(tzParts.find(p => p.type === 'year')?.value || '0', 10);
+    const tzMonth = parseInt(tzParts.find(p => p.type === 'month')?.value || '0', 10);
+    const tzDay = parseInt(tzParts.find(p => p.type === 'day')?.value || '0', 10);
+    const tzHour = parseInt(tzParts.find(p => p.type === 'hour')?.value || '0', 10);
+    const tzMinute = parseInt(tzParts.find(p => p.type === 'minute')?.value || '0', 10);
+    const tzSecond = parseInt(tzParts.find(p => p.type === 'second')?.value || '0', 10);
+
+    // 计算偏移：目标时区时间 - UTC 时间
+    const targetTzDate = new Date(Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMinute, tzSecond));
+    const offsetMs = targetTzDate.getTime() - utcDate.getTime();
+
+    // 调整：我们需要的是该时区时间对应的 UTC 时间
+    // 所以需要反向调整
+    const resultDate = new Date(utcDate.getTime() - offsetMs);
+
+    return resultDate;
+  }
+
+  /**
+   * 计算时间范围（按照指定时区）
+   * @param frequency 频率
+   * @param timezone 时区（IANA 时区标识符，如 Asia/Shanghai）
+   */
+  private calculateTimeRange(frequency: string, timezone?: string): { startTime: Date; endTime: Date } {
+    // 使用传入的时区或默认时区
+    const tz = timezone || this.DEFAULT_TIMEZONE;
+    // 获取指定时区的当前日期时间部分
+    const now = this.getCurrentDateTimePartsInTimezone(tz);
+
+    // 创建今天结束时间（23:59:59）
+    const endTime = this.createDateInTimezone(
+      now.year,
+      now.month,
+      now.day,
+      23,
+      59,
+      59,
+      tz,
+    );
+
+    let startTime: Date;
 
     switch (frequency) {
       case 'daily':
         // 昨天开始到今天结束
-        startTime.setDate(startTime.getDate() - 1);
-        startTime.setHours(0, 0, 0, 0);
+        const yesterday = new Date(now.year, now.month - 1, now.day);
+        yesterday.setDate(yesterday.getDate() - 1);
+        startTime = this.createDateInTimezone(
+          yesterday.getFullYear(),
+          yesterday.getMonth() + 1,
+          yesterday.getDate(),
+          0,
+          0,
+          0,
+          tz,
+        );
         break;
       case 'weekly':
         // 一周前开始到今天结束
-        startTime.setDate(startTime.getDate() - 7);
-        startTime.setHours(0, 0, 0, 0);
+        const weekAgo = new Date(now.year, now.month - 1, now.day);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        startTime = this.createDateInTimezone(
+          weekAgo.getFullYear(),
+          weekAgo.getMonth() + 1,
+          weekAgo.getDate(),
+          0,
+          0,
+          0,
+          tz,
+        );
         break;
       case 'monthly':
         // 一个月前开始到今天结束
-        startTime.setMonth(startTime.getMonth() - 1);
-        startTime.setHours(0, 0, 0, 0);
+        const monthAgo = new Date(now.year, now.month - 1, now.day);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        startTime = this.createDateInTimezone(
+          monthAgo.getFullYear(),
+          monthAgo.getMonth() + 1,
+          monthAgo.getDate(),
+          0,
+          0,
+          0,
+          tz,
+        );
         break;
       default:
         // 默认：昨天开始到今天结束
-        startTime.setDate(startTime.getDate() - 1);
-        startTime.setHours(0, 0, 0, 0);
+        const defaultYesterday = new Date(now.year, now.month - 1, now.day);
+        defaultYesterday.setDate(defaultYesterday.getDate() - 1);
+        startTime = this.createDateInTimezone(
+          defaultYesterday.getFullYear(),
+          defaultYesterday.getMonth() + 1,
+          defaultYesterday.getDate(),
+          0,
+          0,
+          0,
+          tz,
+        );
     }
+
+    logger.info('计算时间范围', {
+      frequency,
+      timezone: tz,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+    });
 
     return { startTime, endTime };
   }

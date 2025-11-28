@@ -104,6 +104,13 @@ export class TaskUpdater {
         updateData.branchIds = taskData.branchIds;
       }
 
+      // timezone 可选，如果提供了就更新，否则使用环境变量中的默认时区
+      if (taskData.timezone !== undefined) {
+        updateData.timezone = taskData.timezone;
+      } else {
+        updateData.timezone = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
+      }
+
       // 使用 upsert 原子性地更新或创建任务，避免并发问题
       const updatedTask = await taskModel
         .findOneAndUpdate(
