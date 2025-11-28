@@ -166,8 +166,23 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       throw new Error(`任务未启用：${taskId}`);
     }
 
+    // 手动触发时，使用历史最近的时间点
+    // 创建一个临时任务对象，用于计算历史最近的时间范围
+    const timezone = task.timezone || this.DEFAULT_TIMEZONE;
+    const { startTime, endTime } = this.calculateTimeRange(task, timezone, true);
+
+    logger.info('手动触发任务时间范围', {
+      taskId,
+      tenantId,
+      frequency: task.frequency,
+      timezone,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+    });
+
     // 执行任务（异步执行，不阻塞）
-    this.executeTask(task).catch((error) => {
+    // 需要传递计算好的时间范围，所以需要修改 executeTask 方法
+    this.executeTaskWithTimeRange(task, startTime, endTime).catch((error) => {
       logger.error('手动触发任务执行失败', {
         taskId,
         tenantId,
@@ -180,10 +195,16 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   }
 
   /**
-   * 执行定时任务
+   * 执行定时任务（使用计算好的时间范围）
    * @param task 定时任务
+   * @param startTime 开始时间（可选，如果不提供则自动计算）
+   * @param endTime 结束时间（可选，如果不提供则自动计算）
    */
-  private async executeTask(task: ScheduledTask): Promise<void> {
+  private async executeTaskWithTimeRange(
+    task: ScheduledTask,
+    startTime?: Date,
+    endTime?: Date,
+  ): Promise<void> {
     const executionStartTime = new Date();
     let executionRecord: TaskExecutionRecordDocument | null = null;
 
@@ -201,14 +222,25 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       executionRecord = await this.createExecutionRecord(task, executionStartTime);
 
       // 计算时间范围（按照任务指定的时区）
-      const timezone = task.timezone || this.DEFAULT_TIMEZONE;
-      const { startTime, endTime } = this.calculateTimeRange(task.frequency, timezone);
+      // 如果未提供时间范围，则自动计算
+      let calculatedStartTime: Date;
+      let calculatedEndTime: Date;
+      
+      if (startTime && endTime) {
+        calculatedStartTime = startTime;
+        calculatedEndTime = endTime;
+      } else {
+        const timezone = task.timezone || this.DEFAULT_TIMEZONE;
+        const timeRange = this.calculateTimeRange(task, timezone, false);
+        calculatedStartTime = timeRange.startTime;
+        calculatedEndTime = timeRange.endTime;
+      }
 
       // 创建并等待导出任务完成（串行执行，避免内存压力）
       const successfulExports = await this.createAndWaitForExportTasks(
         task,
-        startTime,
-        endTime,
+        calculatedStartTime,
+        calculatedEndTime,
         executionRecord,
       );
 
@@ -233,6 +265,14 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       await this.handleExecutionError(task, executionRecord, executionStartTime, error);
       throw error;
     }
+  }
+
+  /**
+   * 执行定时任务（自动计算时间范围）
+   * @param task 定时任务
+   */
+  private async executeTask(task: ScheduledTask): Promise<void> {
+    return this.executeTaskWithTimeRange(task);
   }
 
   /**
@@ -446,7 +486,9 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
 
           // 重新创建导出任务并重试
           try {
-            const { startTime, endTime } = this.calculateTimeRange(task.frequency);
+            // 重试时使用相同的时间范围（手动触发模式，找到历史最近的时间点）
+            const timezone = task.timezone || this.DEFAULT_TIMEZONE;
+            const { startTime, endTime } = this.calculateTimeRange(task, timezone, true);
             const reportPage = this.buildReportPagePath(pageId);
             
             // 重新创建导出任务
@@ -530,7 +572,9 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
 
         // 重新创建导出任务并重试
         try {
-          const { startTime, endTime } = this.calculateTimeRange(task.frequency);
+          // 重试时使用相同的时间范围（手动触发模式，找到历史最近的时间点）
+          const timezone = task.timezone || this.DEFAULT_TIMEZONE;
+          const { startTime, endTime } = this.calculateTimeRange(task, timezone, true);
           const reportPage = this.buildReportPagePath(pageId);
           
           // 重新创建导出任务
@@ -928,90 +972,299 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   }
 
   /**
-   * 计算时间范围（按照指定时区）
-   * @param frequency 频率
-   * @param timezone 时区（IANA 时区标识符，如 Asia/Shanghai）
+   * 解析时间字符串（HH:mm）为小时和分钟
+   * @param timeStr 时间字符串，格式：HH:mm
+   * @returns { hour: number, minute: number }
    */
-  private calculateTimeRange(frequency: string, timezone?: string): { startTime: Date; endTime: Date } {
+  private parseTimeString(timeStr: string): { hour: number; minute: number } {
+    const [hour, minute] = timeStr.split(':').map(Number);
+    if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      throw new Error(`无效的时间格式: ${timeStr}，应为 HH:mm`);
+    }
+    return { hour, minute };
+  }
+
+  /**
+   * 获取星期几对应的数字（0=周日, 1=周一, ..., 6=周六）
+   * @param week 星期枚举值
+   * @returns 星期数字
+   */
+  private getWeekDayNumber(week: string): number {
+    const weekMap: Record<string, number> = {
+      'Sun': 0,
+      'Mon': 1,
+      'Tue': 2,
+      'Wed': 3,
+      'Thu': 4,
+      'Fri': 5,
+      'Sat': 6,
+    };
+    return weekMap[week] ?? 0;
+  }
+
+  /**
+   * 计算时间范围（按照指定时区和任务配置）
+   * @param task 定时任务
+   * @param timezone 时区（IANA 时区标识符，如 Asia/Shanghai）
+   * @param isManualTrigger 是否为手动触发（手动触发时查找历史最近的时间点）
+   */
+  private calculateTimeRange(
+    task: ScheduledTask,
+    timezone?: string,
+    isManualTrigger: boolean = false,
+  ): { startTime: Date; endTime: Date } {
     // 使用传入的时区或默认时区
     const tz = timezone || this.DEFAULT_TIMEZONE;
     // 获取指定时区的当前日期时间部分
     const now = this.getCurrentDateTimePartsInTimezone(tz);
+    
+    // 解析时间字符串
+    const { hour, minute } = this.parseTimeString(task.time.time);
 
-    // 创建今天结束时间（23:59:59）
-    const endTime = this.createDateInTimezone(
-      now.year,
-      now.month,
-      now.day,
-      23,
-      59,
-      59,
-      tz,
-    );
-
+    let endTime: Date;
     let startTime: Date;
 
-    switch (frequency) {
-      case 'daily':
-        // 昨天开始到今天结束
-        const yesterday = new Date(now.year, now.month - 1, now.day);
-        yesterday.setDate(yesterday.getDate() - 1);
-        startTime = this.createDateInTimezone(
-          yesterday.getFullYear(),
-          yesterday.getMonth() + 1,
-          yesterday.getDate(),
-          0,
-          0,
-          0,
-          tz,
-        );
+    switch (task.frequency) {
+      case 'daily': {
+        // 每日：time 作为结束时间，往前推24小时作为开始时间
+        if (isManualTrigger) {
+          // 手动触发：找到历史最近的结束时间点
+          // 如果当前时间已经过了今天的 time，则使用今天的 time 作为结束时间
+          // 否则使用昨天的 time 作为结束时间
+          const todayEndTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            now.day,
+            hour,
+            minute,
+            0,
+            tz,
+          );
+          
+          const currentTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            now.day,
+            now.hour,
+            now.minute,
+            now.second,
+            tz,
+          );
+
+          if (currentTime >= todayEndTime) {
+            // 使用今天的 time 作为结束时间
+            endTime = todayEndTime;
+          } else {
+            // 使用昨天的 time 作为结束时间
+            const yesterday = new Date(now.year, now.month - 1, now.day);
+            yesterday.setDate(yesterday.getDate() - 1);
+            endTime = this.createDateInTimezone(
+              yesterday.getFullYear(),
+              yesterday.getMonth() + 1,
+              yesterday.getDate(),
+              hour,
+              minute,
+              0,
+              tz,
+            );
+          }
+        } else {
+          // 定时执行：使用今天的 time 作为结束时间
+          endTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            now.day,
+            hour,
+            minute,
+            0,
+            tz,
+          );
+        }
+
+        // 往前推24小时作为开始时间
+        startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
         break;
-      case 'weekly':
-        // 一周前开始到今天结束
-        const weekAgo = new Date(now.year, now.month - 1, now.day);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        startTime = this.createDateInTimezone(
-          weekAgo.getFullYear(),
-          weekAgo.getMonth() + 1,
-          weekAgo.getDate(),
-          0,
-          0,
-          0,
-          tz,
-        );
+      }
+
+      case 'weekly': {
+        // 每周：week + time 作为结束时间，往前推7天作为开始时间
+        if (!task.time.week) {
+          throw new Error('weekly 频率必须配置 week 字段');
+        }
+
+        const targetWeekDay = this.getWeekDayNumber(task.time.week);
+        
+        if (isManualTrigger) {
+          // 手动触发：找到历史最近的指定星期几的 time
+          const currentDate = new Date(now.year, now.month - 1, now.day);
+          const currentWeekDay = currentDate.getDay(); // 0=周日, 1=周一, ..., 6=周六
+          
+          // 计算距离目标星期几的天数
+          let daysDiff = currentWeekDay - targetWeekDay;
+          if (daysDiff < 0) {
+            daysDiff += 7; // 如果目标星期几还没到，往前推一周
+          }
+          
+          // 如果当前时间已经过了今天的 time，且今天是目标星期几，则使用今天
+          // 否则往前找到最近的目标星期几
+          const todayEndTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            now.day,
+            hour,
+            minute,
+            0,
+            tz,
+          );
+          
+          const currentTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            now.day,
+            now.hour,
+            now.minute,
+            now.second,
+            tz,
+          );
+
+          let targetDate = new Date(currentDate);
+          if (currentWeekDay === targetWeekDay && currentTime >= todayEndTime) {
+            // 今天就是目标星期几，且已经过了 time，使用今天
+            targetDate = currentDate;
+          } else {
+            // 往前找到最近的目标星期几
+            if (daysDiff === 0 && currentTime < todayEndTime) {
+              // 今天就是目标星期几，但还没到 time，往前推一周
+              daysDiff = 7;
+            }
+            targetDate.setDate(targetDate.getDate() - daysDiff);
+          }
+
+          endTime = this.createDateInTimezone(
+            targetDate.getFullYear(),
+            targetDate.getMonth() + 1,
+            targetDate.getDate(),
+            hour,
+            minute,
+            0,
+            tz,
+          );
+        } else {
+          // 定时执行：使用本周的指定星期几的 time 作为结束时间
+          const currentDate = new Date(now.year, now.month - 1, now.day);
+          const currentWeekDay = currentDate.getDay();
+          let daysDiff = currentWeekDay - targetWeekDay;
+          if (daysDiff < 0) {
+            daysDiff += 7;
+          }
+          const targetDate = new Date(currentDate);
+          targetDate.setDate(targetDate.getDate() - daysDiff);
+
+          endTime = this.createDateInTimezone(
+            targetDate.getFullYear(),
+            targetDate.getMonth() + 1,
+            targetDate.getDate(),
+            hour,
+            minute,
+            0,
+            tz,
+          );
+        }
+
+        // 往前推7天作为开始时间
+        startTime = new Date(endTime.getTime() - 7 * 24 * 60 * 60 * 1000);
         break;
-      case 'monthly':
-        // 一个月前开始到今天结束
-        const monthAgo = new Date(now.year, now.month - 1, now.day);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        startTime = this.createDateInTimezone(
-          monthAgo.getFullYear(),
-          monthAgo.getMonth() + 1,
-          monthAgo.getDate(),
-          0,
-          0,
-          0,
-          tz,
-        );
+      }
+
+      case 'monthly': {
+        // 每月：day + time 作为结束时间，往前推30天作为开始时间
+        if (!task.time.day) {
+          throw new Error('monthly 频率必须配置 day 字段');
+        }
+
+        if (isManualTrigger) {
+          // 手动触发：找到历史最近的指定日期的 time
+          const currentDate = new Date(now.year, now.month - 1, now.day);
+          const targetDay = task.time.day;
+
+          // 如果当前日期已经过了本月的目标日期，或当前日期就是目标日期但已过 time
+          const todayEndTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            now.day,
+            hour,
+            minute,
+            0,
+            tz,
+          );
+          
+          const currentTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            now.day,
+            now.hour,
+            now.minute,
+            now.second,
+            tz,
+          );
+
+          let targetDate: Date;
+          if (now.day >= targetDay && (now.day > targetDay || currentTime >= todayEndTime)) {
+            // 使用本月的目标日期
+            targetDate = new Date(now.year, now.month - 1, targetDay);
+          } else {
+            // 使用上月的目标日期
+            const lastMonth = new Date(now.year, now.month - 1, 1);
+            lastMonth.setMonth(lastMonth.getMonth() - 1);
+            // 处理月份天数不足的情况（如2月只有28/29天）
+            const lastMonthDays = new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0).getDate();
+            const day = Math.min(targetDay, lastMonthDays);
+            targetDate = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), day);
+          }
+
+          endTime = this.createDateInTimezone(
+            targetDate.getFullYear(),
+            targetDate.getMonth() + 1,
+            targetDate.getDate(),
+            hour,
+            minute,
+            0,
+            tz,
+          );
+        } else {
+          // 定时执行：使用本月的指定日期的 time 作为结束时间
+          const currentDate = new Date(now.year, now.month - 1, 1);
+          // 处理月份天数不足的情况
+          const daysInMonth = new Date(now.year, now.month, 0).getDate();
+          const day = Math.min(task.time.day, daysInMonth);
+          
+          endTime = this.createDateInTimezone(
+            now.year,
+            now.month,
+            day,
+            hour,
+            minute,
+            0,
+            tz,
+          );
+        }
+
+        // 往前推30天作为开始时间
+        startTime = new Date(endTime.getTime() - 30 * 24 * 60 * 60 * 1000);
         break;
+      }
+
       default:
-        // 默认：昨天开始到今天结束
-        const defaultYesterday = new Date(now.year, now.month - 1, now.day);
-        defaultYesterday.setDate(defaultYesterday.getDate() - 1);
-        startTime = this.createDateInTimezone(
-          defaultYesterday.getFullYear(),
-          defaultYesterday.getMonth() + 1,
-          defaultYesterday.getDate(),
-          0,
-          0,
-          0,
-          tz,
-        );
+        throw new Error(`不支持的频率: ${task.frequency}`);
     }
 
     logger.info('计算时间范围', {
-      frequency,
+      frequency: task.frequency,
       timezone: tz,
+      isManualTrigger,
+      time: task.time.time,
+      week: task.time.week,
+      day: task.time.day,
       startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
     });
