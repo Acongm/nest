@@ -17,6 +17,11 @@ import { logger } from '../common/logger';
 @Injectable()
 export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+  // 从环境变量读取重试次数，默认3次
+  private readonly EXPORT_RETRY_COUNT = parseInt(
+    process.env.EXPORT_RETRY_COUNT || '3',
+    10,
+  );
 
   constructor(
     @InjectModel(ScheduledTask.name)
@@ -267,17 +272,18 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   }
 
   /**
-   * 为单个页面创建导出任务
+   * 为单个页面创建导出任务并等待完成（串行执行，避免并发内存过大）
    */
   private async createExportTasksForPage(
     task: ScheduledTask,
     pageId: string,
     startTime: Date,
     endTime: Date,
-  ): Promise<Array<{ exportTask: any; pageId: string; branchId?: string }>> {
+    executionRecord: TaskExecutionRecordDocument,
+  ): Promise<Array<{ task: any; pageId: string; branchId?: string }>> {
     const reportPage = this.buildReportPagePath(pageId);
 
-    logger.info('创建导出任务', {
+    logger.info('开始处理页面导出', {
       taskId: task.id,
       pageId,
       branchIds: task.branchIds,
@@ -299,7 +305,11 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
 
       const createdTasks: any[] = Array.isArray(exportTaskResult) ? exportTaskResult : [exportTaskResult];
 
-      logger.info('导出任务创建成功', {
+      // 更新总导出任务数
+      executionRecord.totalExports += createdTasks.length;
+      await executionRecord.save();
+
+      logger.info('导出任务创建成功，开始等待完成', {
         taskId: task.id,
         pageId,
         branchIds: task.branchIds,
@@ -309,11 +319,49 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
         taskIds: createdTasks.map((t: any) => t._id.toString()),
       });
 
-      return createdTasks.map((exportTask, i) => ({
-        exportTask: Promise.resolve(exportTask),
+      const successfulExports: Array<{ task: any; pageId: string; branchId?: string }> = [];
+      let pageSuccessfulCount = 0;
+
+      // 串行等待每个导出任务完成，确保单个任务完成后再处理下一个
+      for (let i = 0; i < createdTasks.length; i++) {
+        const exportTask = createdTasks[i];
+        const exportTaskId = exportTask._id.toString();
+        const branchId = task.branchIds && task.branchIds.length > 0 ? task.branchIds[i] : undefined;
+
+        // 等待当前导出任务完成（带重试机制）
+        const result = await this.waitForSingleExportTask(task, exportTaskId, pageId, branchId, 0);
+        if (result) {
+          successfulExports.push(result);
+          pageSuccessfulCount++;
+          logger.info('页面导出任务成功完成', {
+            taskId: task.id,
+            pageId,
+            branchId,
+            exportTaskId,
+            currentIndex: i + 1,
+            totalTasks: createdTasks.length,
+          });
+        } else {
+          logger.warn('页面导出任务最终失败', {
+            taskId: task.id,
+            pageId,
+            branchId,
+            exportTaskId,
+            currentIndex: i + 1,
+            totalTasks: createdTasks.length,
+          });
+        }
+      }
+
+      logger.info('页面所有导出任务处理完成', {
+        taskId: task.id,
         pageId,
-        branchId: task.branchIds && task.branchIds.length > 0 ? task.branchIds[i] : undefined,
-      }));
+        pageExportsCount: createdTasks.length,
+        pageSuccessfulExports: pageSuccessfulCount,
+        pageFailedExports: createdTasks.length - pageSuccessfulCount,
+      });
+
+      return successfulExports;
     } catch (createError: any) {
       logger.error('创建导出任务失败', {
         taskId: task.id,
@@ -328,19 +376,22 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   }
 
   /**
-   * 等待单个导出任务完成
+   * 等待单个导出任务完成（带重试机制）
    */
   private async waitForSingleExportTask(
     task: ScheduledTask,
     exportTaskId: string,
     pageId: string,
     branchId?: string,
+    retryCount: number = 0,
   ): Promise<{ task: any; pageId: string; branchId?: string } | null> {
     logger.info('开始等待导出任务完成', {
       taskId: task.id,
       exportTaskId,
       pageId,
       branchId,
+      retryCount,
+      maxRetries: this.EXPORT_RETRY_COUNT,
     });
 
     try {
@@ -353,6 +404,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
         branchId,
         status: completedTask.status,
         filePath: completedTask.filePath,
+        retryCount,
       });
 
       if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
@@ -362,31 +414,179 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
           branchId,
         };
       } else {
-        logger.warn('导出任务未成功完成', {
+        // 导出任务失败，检查是否需要重试
+        if (retryCount < this.EXPORT_RETRY_COUNT) {
+          logger.warn('导出任务失败，准备重试', {
+            taskId: task.id,
+            exportTaskId,
+            pageId,
+            branchId,
+            status: completedTask.status,
+            errorMessage: completedTask.errorMessage,
+            retryCount,
+            maxRetries: this.EXPORT_RETRY_COUNT,
+            nextRetry: retryCount + 1,
+          });
+
+          // 等待一段时间后重试（指数退避：1秒、2秒、4秒...）
+          const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+
+          // 重新创建导出任务并重试
+          try {
+            const { startTime, endTime } = this.calculateTimeRange(task.frequency);
+            const reportPage = this.buildReportPagePath(pageId);
+            
+            // 重新创建导出任务
+            const retryExportTaskResult = await this.reportExportService.createExportTask(
+              {
+                startTime: startTime.toISOString(),
+                endTime: endTime.toISOString(),
+                branchIds: branchId ? [branchId] : undefined,
+                reportPage,
+                taskName: `定时任务-${task.id}-重试${retryCount + 1}`,
+              },
+              task.tenantId,
+            );
+
+            const retryTask = Array.isArray(retryExportTaskResult) 
+              ? retryExportTaskResult[0] 
+              : retryExportTaskResult;
+            const retryTaskId = retryTask._id.toString();
+
+            logger.info('重试导出任务已创建', {
+              taskId: task.id,
+              originalExportTaskId: exportTaskId,
+              retryExportTaskId: retryTaskId,
+              pageId,
+              branchId,
+              retryCount: retryCount + 1,
+            });
+
+            // 递归调用，增加重试次数
+            return await this.waitForSingleExportTask(
+              task,
+              retryTaskId,
+              pageId,
+              branchId,
+              retryCount + 1,
+            );
+          } catch (retryCreateError: any) {
+            logger.error('重试创建导出任务失败', {
+              taskId: task.id,
+              exportTaskId,
+              pageId,
+              branchId,
+              retryCount,
+              error: retryCreateError.message,
+              stack: retryCreateError.stack,
+            });
+            return null;
+          }
+        } else {
+          // 已达到最大重试次数
+          logger.error('导出任务失败，已达到最大重试次数', {
+            taskId: task.id,
+            exportTaskId,
+            pageId,
+            branchId,
+            status: completedTask.status,
+            errorMessage: completedTask.errorMessage,
+            retryCount,
+            maxRetries: this.EXPORT_RETRY_COUNT,
+          });
+          return null;
+        }
+      }
+    } catch (waitError: any) {
+      // 等待过程中出错，检查是否需要重试
+      if (retryCount < this.EXPORT_RETRY_COUNT) {
+        logger.warn('等待导出任务完成失败，准备重试', {
           taskId: task.id,
           exportTaskId,
           pageId,
           branchId,
-          status: completedTask.status,
-          errorMessage: completedTask.errorMessage,
+          error: waitError.message,
+          retryCount,
+          maxRetries: this.EXPORT_RETRY_COUNT,
+          nextRetry: retryCount + 1,
+        });
+
+        // 等待一段时间后重试（指数退避）
+        const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+
+        // 重新创建导出任务并重试
+        try {
+          const { startTime, endTime } = this.calculateTimeRange(task.frequency);
+          const reportPage = this.buildReportPagePath(pageId);
+          
+          // 重新创建导出任务
+          const retryExportTaskResult = await this.reportExportService.createExportTask(
+            {
+              startTime: startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              branchIds: branchId ? [branchId] : undefined,
+              reportPage,
+              taskName: `定时任务-${task.id}-重试${retryCount + 1}`,
+            },
+            task.tenantId,
+          );
+
+          const retryTask = Array.isArray(retryExportTaskResult) 
+            ? retryExportTaskResult[0] 
+            : retryExportTaskResult;
+          const retryTaskId = retryTask._id.toString();
+
+          logger.info('重试导出任务已创建（异常重试）', {
+            taskId: task.id,
+            originalExportTaskId: exportTaskId,
+            retryExportTaskId: retryTaskId,
+            pageId,
+            branchId,
+            retryCount: retryCount + 1,
+          });
+
+          // 递归调用，增加重试次数
+          return await this.waitForSingleExportTask(
+            task,
+            retryTaskId,
+            pageId,
+            branchId,
+            retryCount + 1,
+          );
+        } catch (retryCreateError: any) {
+          logger.error('重试创建导出任务失败（异常重试）', {
+            taskId: task.id,
+            exportTaskId,
+            pageId,
+            branchId,
+            retryCount,
+            error: retryCreateError.message,
+            stack: retryCreateError.stack,
+          });
+          return null;
+        }
+      } else {
+        // 已达到最大重试次数
+        logger.error('等待导出任务完成失败，已达到最大重试次数', {
+          taskId: task.id,
+          exportTaskId,
+          pageId,
+          branchId,
+          error: waitError.message,
+          stack: waitError.stack,
+          retryCount,
+          maxRetries: this.EXPORT_RETRY_COUNT,
         });
         return null;
       }
-    } catch (waitError: any) {
-      logger.error('等待导出任务完成失败', {
-        taskId: task.id,
-        exportTaskId,
-        pageId,
-        branchId,
-        error: waitError.message,
-        stack: waitError.stack,
-      });
-      return null;
     }
   }
 
   /**
    * 创建并等待所有导出任务完成（串行执行）
+   * 每个页面在 createExportTasksForPage 中已经完成导出，这里只需要串行调用并收集结果
    */
   private async createAndWaitForExportTasks(
     task: ScheduledTask,
@@ -402,7 +602,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       return [];
     }
 
-    logger.info('开始创建导出任务', {
+    logger.info('开始创建并执行导出任务', {
       taskId: task.id,
       pageIds: task.pageIds,
       branchIds: task.branchIds,
@@ -417,25 +617,33 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
 
     const successfulExports: Array<{ task: any; pageId: string; branchId?: string }> = [];
 
-    // 串行处理每个 pageId，避免并发过多导致内存压力
-    for (const pageId of task.pageIds) {
-      // 为当前 pageId 创建导出任务
-      const exportTasks = await this.createExportTasksForPage(task, pageId, startTime, endTime);
+    // 串行处理每个 pageId，确保单个页面导出文件后才执行下一个导出
+    // createExportTasksForPage 内部已经串行等待所有导出任务完成，避免并发内存过大
+    for (let i = 0; i < task.pageIds.length; i++) {
+      const pageId = task.pageIds[i];
+      
+      logger.info('开始处理页面导出', {
+        taskId: task.id,
+        pageId,
+        currentPageIndex: i + 1,
+        totalPages: task.pageIds.length,
+      });
 
-      // 更新总导出任务数
-      executionRecord.totalExports += exportTasks.length;
-      await executionRecord.save();
+      // 为当前 pageId 创建导出任务并等待完成（内部串行执行）
+      // createExportTasksForPage 内部会更新 executionRecord.totalExports
+      const pageExports = await this.createExportTasksForPage(task, pageId, startTime, endTime, executionRecord);
 
-      // 串行等待每个导出任务完成
-      for (const { exportTask, pageId: taskPageId, branchId } of exportTasks) {
-        const resolvedTask = await exportTask;
-        const exportTaskId = resolvedTask._id.toString();
+      // 收集成功的导出结果
+      successfulExports.push(...pageExports);
 
-        const result = await this.waitForSingleExportTask(task, exportTaskId, taskPageId, branchId);
-        if (result) {
-          successfulExports.push(result);
-        }
-      }
+      logger.info('页面导出处理完成', {
+        taskId: task.id,
+        pageId,
+        currentPageIndex: i + 1,
+        totalPages: task.pageIds.length,
+        pageSuccessfulExports: pageExports.length,
+        totalSuccessfulExports: successfulExports.length,
+      });
     }
 
     logger.info('所有导出任务处理完成', {

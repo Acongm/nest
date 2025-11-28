@@ -1,10 +1,13 @@
 import { Injectable, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { InjectConnection } from '@nestjs/mongoose';
+import { Connection } from 'mongoose';
+import { GridFSBucket } from 'mongodb';
 import { CreateExportTaskDto } from './dto/create-export-task.dto';
 import { ExportTask, ExportTaskStatus } from './schemas/export-task.schema';
 import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, rmdirSync, statSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 const pLimit = require('p-limit');
 import { logger } from '../common/logger';
@@ -31,14 +34,34 @@ export class ReportExportService {
     process.env.EXPORT_TASK_TIMEOUT || '300000',
     10,
   );
+  // GridFS 存储大小限制（字节），默认 1GB
+  private readonly MAX_STORAGE_SIZE = parseInt(
+    process.env.MAX_STORAGE_SIZE || '1073741824',
+    10,
+  );
+  // 当超过存储限制时，清理比例（0-1），默认清理 30%
+  private readonly CLEANUP_RATIO = parseFloat(
+    process.env.CLEANUP_RATIO || '0.3',
+  );
+  // GridFS bucket 名称
+  private readonly GRIDFS_BUCKET_NAME = 'export_files';
   // 并发限制器
   private readonly limit = pLimit(this.MAX_CONCURRENT_EXPORTS);
   // Worker 进程路径（根据环境自动选择）
   private readonly workerPath = this.getWorkerPath();
+  // GridFS bucket 实例
+  private gridFSBucket: GridFSBucket;
 
   constructor(
     @InjectModel(ExportTask.name) private exportTaskModel: Model<ExportTask>,
+    @InjectConnection() private connection: Connection,
   ) {
+    // 初始化 GridFS bucket
+    // 使用 connection.db 作为 any 类型来避免类型不匹配问题
+    this.gridFSBucket = new GridFSBucket(this.connection.db as any, {
+      bucketName: this.GRIDFS_BUCKET_NAME,
+    });
+    
     // 确保上传目录存在
     if (!existsSync(this.UPLOAD_DIR)) {
       mkdirSync(this.UPLOAD_DIR, { recursive: true });
@@ -53,6 +76,8 @@ export class ReportExportService {
       maxDailyExports: this.MAX_DAILY_EXPORTS,
       uploadDir: this.UPLOAD_DIR,
       taskTimeout: this.TASK_TIMEOUT,
+      maxStorageSize: this.MAX_STORAGE_SIZE,
+      cleanupRatio: this.CLEANUP_RATIO,
     });
   }
 
@@ -226,6 +251,9 @@ export class ReportExportService {
       throw new Error('任务不存在');
     }
 
+    let absoluteFilePath: string | null = null;
+    let taskDir: string | null = null;
+
     try {
       // 更新状态为处理中
       task.status = ExportTaskStatus.PROCESSING;
@@ -245,7 +273,7 @@ export class ReportExportService {
       });
 
       // 使用子进程导出PDF（带超时控制）
-      const absoluteFilePath = await Promise.race([
+      absoluteFilePath = await Promise.race([
         this.exportToPdfViaWorker(reportUrl, taskId),
         new Promise<never>((_, reject) =>
           setTimeout(
@@ -255,23 +283,32 @@ export class ReportExportService {
         ),
       ]);
 
-      // 将绝对路径转换为相对路径（相对于 UPLOAD_DIR）
-      // 例如：/path/to/uploads/reports/file.pdf -> reports/file.pdf
-      const relativeFilePath = this.getRelativeFilePath(absoluteFilePath);
+      // 读取文件并存储到 GridFS
+      const fileBuffer = readFileSync(absoluteFilePath);
+      const fileSize = fileBuffer.length;
+      const fileId = await this.storeFileToGridFS(fileBuffer, taskId, fileSize);
+
+      // 检查存储大小限制，如果超过则清理旧文件
+      await this.checkAndCleanupStorage();
+
+      // 删除临时文件夹
+      taskDir = join(this.UPLOAD_DIR, taskId);
+      this.deleteTaskDirectory(taskDir);
 
       // 生成下载URL
       const downloadUrl = `/api/report-export/download/${taskId}`;
 
       // 更新任务状态为已完成
       task.status = ExportTaskStatus.COMPLETED;
-      task.filePath = relativeFilePath; // 保存相对路径
+      task.fileId = fileId.toString();
+      task.fileSize = fileSize;
       task.downloadUrl = downloadUrl;
       await task.save();
 
       logger.info('导出任务完成', {
         taskId,
-        relativeFilePath,
-        absoluteFilePath,
+        fileId,
+        fileSize,
         downloadUrl,
       });
     } catch (error) {
@@ -280,12 +317,220 @@ export class ReportExportService {
       task.errorMessage = error.message || '导出失败';
       await task.save();
 
+      // 清理临时文件
+      if (taskDir) {
+        this.deleteTaskDirectory(taskDir);
+      } else if (absoluteFilePath) {
+        // 如果 taskDir 不存在，尝试删除单个文件
+        try {
+          if (existsSync(absoluteFilePath)) {
+            unlinkSync(absoluteFilePath);
+          }
+        } catch (cleanupError) {
+          logger.warn('清理临时文件失败', {
+            taskId,
+            filePath: absoluteFilePath,
+            error: cleanupError.message,
+          });
+        }
+      }
+
       logger.error('导出任务失败', {
         taskId,
         error: error.message,
         stack: error.stack,
       });
       throw error;
+    }
+  }
+
+  /**
+   * 存储文件到 GridFS
+   */
+  private async storeFileToGridFS(
+    fileBuffer: Buffer,
+    taskId: string,
+    fileSize: number,
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const uploadStream = this.gridFSBucket.openUploadStream(`report_${taskId}.pdf`, {
+        metadata: {
+          taskId,
+          uploadedAt: new Date(),
+        },
+      });
+
+      uploadStream.on('error', (error) => {
+        logger.error('GridFS 上传失败', { taskId, error: error.message });
+        reject(error);
+      });
+
+      uploadStream.on('finish', () => {
+        const fileId = uploadStream.id.toString();
+        logger.info('文件已存储到 GridFS', { taskId, fileId, fileSize });
+        resolve(fileId);
+      });
+
+      uploadStream.end(fileBuffer);
+    });
+  }
+
+  /**
+   * 从 GridFS 读取文件
+   */
+  async getFileFromGridFS(fileId: string): Promise<Buffer> {
+    const { ObjectId } = require('mongodb');
+    return new Promise((resolve, reject) => {
+      const downloadStream = this.gridFSBucket.openDownloadStream(
+        new ObjectId(fileId),
+      );
+
+      const chunks: Buffer[] = [];
+
+      downloadStream.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+
+      downloadStream.on('error', (error) => {
+        logger.error('GridFS 读取失败', { fileId, error: error.message });
+        reject(error);
+      });
+
+      downloadStream.on('end', () => {
+        resolve(Buffer.concat(chunks));
+      });
+    });
+  }
+
+  /**
+   * 获取当前存储大小
+   */
+  private async getCurrentStorageSize(): Promise<number> {
+    const filesCollection = this.connection.db.collection(
+      this.GRIDFS_BUCKET_NAME + '.files',
+    );
+    const result = await filesCollection.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalSize: { $sum: '$length' },
+        },
+      },
+    ]).toArray();
+
+    return result.length > 0 ? result[0].totalSize : 0;
+  }
+
+  /**
+   * 检查存储大小并清理旧文件
+   */
+  private async checkAndCleanupStorage(): Promise<void> {
+    const currentSize = await this.getCurrentStorageSize();
+    
+    if (currentSize <= this.MAX_STORAGE_SIZE) {
+      return;
+    }
+
+    logger.info('存储大小超过限制，开始清理', {
+      currentSize,
+      maxSize: this.MAX_STORAGE_SIZE,
+      cleanupRatio: this.CLEANUP_RATIO,
+    });
+
+    // 计算需要清理的大小
+    const targetSize = this.MAX_STORAGE_SIZE * (1 - this.CLEANUP_RATIO);
+    const needToFree = currentSize - targetSize;
+
+    // 获取所有已完成的任务，按创建时间排序（最旧的优先）
+    const oldTasks = await this.exportTaskModel
+      .find({
+        status: ExportTaskStatus.COMPLETED,
+        fileId: { $exists: true, $ne: null },
+      })
+      .sort({ createdAt: 1 })
+      .exec();
+
+    let freedSize = 0;
+    const deletedFileIds: string[] = [];
+
+    for (const task of oldTasks) {
+      if (freedSize >= needToFree) {
+        break;
+      }
+
+      if (task.fileId) {
+        const fileIdToDelete = task.fileId;
+        try {
+          // 获取文件信息
+          const { ObjectId } = require('mongodb');
+          const filesCollection = this.connection.db.collection(
+            this.GRIDFS_BUCKET_NAME + '.files',
+          );
+          const fileInfo = await filesCollection.findOne({
+            _id: new ObjectId(fileIdToDelete),
+          });
+
+          if (fileInfo) {
+            const fileSizeToDelete = fileInfo.length || 0;
+            
+            // 删除 GridFS 文件
+            await this.gridFSBucket.delete(new ObjectId(fileIdToDelete));
+            
+            freedSize += fileSizeToDelete;
+            deletedFileIds.push(fileIdToDelete);
+
+            // 更新任务记录
+            task.fileId = undefined;
+            task.fileSize = undefined;
+            await task.save();
+
+            logger.info('已删除旧文件', {
+              taskId: task._id.toString(),
+              fileId: fileIdToDelete,
+              fileSize: fileSizeToDelete,
+            });
+          }
+        } catch (error) {
+          logger.error('删除文件失败', {
+            taskId: task._id.toString(),
+            fileId: fileIdToDelete,
+            error: error.message,
+          });
+        }
+      }
+    }
+
+    logger.info('存储清理完成', {
+      freedSize,
+      deletedCount: deletedFileIds.length,
+      remainingSize: currentSize - freedSize,
+    });
+  }
+
+  /**
+   * 删除任务临时目录
+   */
+  private deleteTaskDirectory(taskDir: string): void {
+    try {
+      if (existsSync(taskDir)) {
+        // 删除目录下的所有文件
+        const fs = require('fs');
+        const files = fs.readdirSync(taskDir);
+        for (const file of files) {
+          const filePath = join(taskDir, file);
+          if (statSync(filePath).isFile()) {
+            unlinkSync(filePath);
+          }
+        }
+        // 删除目录
+        rmdirSync(taskDir);
+        logger.info('已删除临时导出文件夹', { taskDir });
+      }
+    } catch (error) {
+      logger.warn('删除临时文件夹失败', {
+        taskDir,
+        error: error.message,
+      });
     }
   }
 
@@ -575,8 +820,34 @@ export class ReportExportService {
   }
 
   /**
+   * 获取任务文件（验证租户ID）
+   * 如果文件存储在 GridFS，返回文件 Buffer；否则返回文件路径（兼容旧数据）
+   */
+  async getTaskFile(taskId: string, tenantId: string): Promise<{ buffer?: Buffer; filePath?: string }> {
+    const task = await this.findOne(taskId, tenantId);
+    if (task.status !== ExportTaskStatus.COMPLETED) {
+      throw new HttpException('文件不存在或任务未完成', HttpStatus.NOT_FOUND);
+    }
+    
+    // 优先使用 GridFS
+    if (task.fileId) {
+      const buffer = await this.getFileFromGridFS(task.fileId);
+      return { buffer };
+    }
+    
+    // 兼容旧数据：从文件系统读取
+    if (task.filePath) {
+      const absolutePath = this.getAbsoluteFilePath(task.filePath);
+      return { filePath: absolutePath };
+    }
+    
+    throw new HttpException('文件不存在', HttpStatus.NOT_FOUND);
+  }
+
+  /**
    * 获取任务文件路径（验证租户ID）
-   * 返回绝对路径，用于读取文件
+   * 返回绝对路径，用于读取文件（兼容旧方法）
+   * @deprecated 使用 getTaskFile 方法替代
    */
   async getTaskFilePath(taskId: string, tenantId: string): Promise<string> {
     const task = await this.findOne(taskId, tenantId);

@@ -49,9 +49,17 @@ export class ExportTask extends Document {
   })
   status: ExportTaskStatus;
 
-  /** PDF文件路径 */
+  /** PDF文件路径（已废弃，保留用于兼容） */
   @Prop({ type: String })
   filePath?: string;
+
+  /** GridFS 文件ID */
+  @Prop({ type: String, index: true })
+  fileId?: string;
+
+  /** 文件大小（字节） */
+  @Prop({ type: Number })
+  fileSize?: number;
 
   /** 下载URL */
   @Prop({ type: String })

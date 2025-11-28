@@ -22,10 +22,8 @@ export class TaskUpdater {
     taskId: string,
     tenantId: string,
   ): Promise<ScheduledTask> {
-    const existingTask = await taskModel.findOne({ id: taskId, tenantId }).exec();
-
-    if (existingTask) {
-      // 使用 findOneAndUpdate 更新 enable 字段
+    try {
+      // 使用 upsert 原子性地更新或创建任务，避免并发问题
       const updatedTask = await taskModel
         .findOneAndUpdate(
           { id: taskId, tenantId },
@@ -33,9 +31,25 @@ export class TaskUpdater {
             $set: {
               enable: false,
               updated: new Date()
+            },
+            $setOnInsert: {
+              // 仅在插入时设置这些字段
+              id: taskId,
+              tenantId,
+              frequency: FrequencyEnum.DAILY,
+              time: { time: '00:00' },
+              recipient: [],
+              pageIds: [],
+              branchIds: [],
+              cronExpression: '0 0 0 * * *',
+              created: new Date(),
             }
           },
-          { new: true } // 返回更新后的文档
+          { 
+            new: true, // 返回更新后的文档
+            upsert: true, // 如果不存在则创建
+            runValidators: true, // 运行验证器
+          }
         )
         .exec();
       
@@ -44,22 +58,15 @@ export class TaskUpdater {
       }
       
       return updatedTask;
-    } else {
-      // 如果任务不存在，创建一个禁用的任务（使用默认值）
-      const newTask = new taskModel({
-        id: taskId,
-        tenantId,
-        enable: false,
-        frequency: FrequencyEnum.DAILY,
-        time: { time: '00:00' },
-        recipient: [],
-        pageIds: [],
-        branchIds: [],
-        cronExpression: '0 0 0 * * *',
-        created: new Date(),
-        updated: new Date(),
-      });
-      return await newTask.save();
+    } catch (error: any) {
+      // 如果是重复键错误，说明数据库中仍有旧的 id_1 唯一索引
+      if (error.code === 11000 && error.keyPattern?.id) {
+        throw new Error(
+          `数据库索引错误：仍存在旧的 id_1 唯一索引。请运行修复脚本删除该索引：` +
+          `db.scheduled_tasks.dropIndex("id_1")`
+        );
+      }
+      throw error;
     }
   }
 
@@ -77,33 +84,44 @@ export class TaskUpdater {
     taskData: CreateScheduledTaskDto,
     tenantId: string,
   ): Promise<ScheduledTask> {
-    // 生成 cron 表达式
-    const cronExpression = CronGenerator.generate(taskData.frequency!, taskData.time!);
+    try {
+      // 生成 cron 表达式
+      const cronExpression = CronGenerator.generate(taskData.frequency!, taskData.time!);
 
-    const existingTask = await taskModel.findOne({ id: taskId, tenantId }).exec();
-
-    if (existingTask) {
-      // 使用 findOneAndUpdate 更新现有任务
+      // 构建更新数据
       const updateData: any = {
-              enable: true,
-              frequency: taskData.frequency!,
-              time: taskData.time!,
-              recipient: taskData.recipient!,
-              pageIds: taskData.pageIds!,
-              cronExpression,
-              updated: new Date(),
+        enable: true,
+        frequency: taskData.frequency!,
+        time: taskData.time!,
+        recipient: taskData.recipient!,
+        pageIds: taskData.pageIds!,
+        cronExpression,
+        updated: new Date(),
       };
       
       // branchIds 允许为空数组，如果提供了就更新
       if (taskData.branchIds !== undefined) {
         updateData.branchIds = taskData.branchIds;
       }
-      
+
+      // 使用 upsert 原子性地更新或创建任务，避免并发问题
       const updatedTask = await taskModel
         .findOneAndUpdate(
           { id: taskId, tenantId },
-          { $set: updateData },
-          { new: true } // 返回更新后的文档
+          {
+            $set: updateData,
+            $setOnInsert: {
+              // 仅在插入时设置这些字段
+              id: taskId,
+              tenantId,
+              created: new Date(),
+            }
+          },
+          { 
+            new: true, // 返回更新后的文档
+            upsert: true, // 如果不存在则创建
+            runValidators: true, // 运行验证器
+          }
         )
         .exec();
       
@@ -112,24 +130,15 @@ export class TaskUpdater {
       }
       
       return updatedTask;
-    } else {
-      // 创建新任务
-      const newTaskData: any = {
-        id: taskId,
-        tenantId,
-        enable: true,
-        frequency: taskData.frequency!,
-        time: taskData.time!,
-        recipient: taskData.recipient!,
-        pageIds: taskData.pageIds!,
-        branchIds: taskData.branchIds || [], // 如果未提供，使用空数组
-        cronExpression,
-        created: new Date(),
-        updated: new Date(),
-      };
-      
-      const newTask = new taskModel(newTaskData);
-      return await newTask.save();
+    } catch (error: any) {
+      // 如果是重复键错误，说明数据库中仍有旧的 id_1 唯一索引
+      if (error.code === 11000 && error.keyPattern?.id) {
+        throw new Error(
+          `数据库索引错误：仍存在旧的 id_1 唯一索引。请运行修复脚本删除该索引：` +
+          `db.scheduled_tasks.dropIndex("id_1") 或执行 scripts/fix-scheduled-tasks-index-complete.js`
+        );
+      }
+      throw error;
     }
   }
 }

@@ -6,7 +6,7 @@
 
 import * as puppeteer from 'puppeteer';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
 import * as winston from 'winston';
 
@@ -152,9 +152,16 @@ async function exportToPdf(
     // 等待页面加载完成
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
+    // 按 taskId 创建临时文件夹隔离导出文件
+    const taskDir = join(uploadDir, taskId);
+    if (!existsSync(taskDir)) {
+      mkdirSync(taskDir, { recursive: true });
+      logger.info(`创建临时导出文件夹: ${taskDir}`);
+    }
+
     // 生成文件名
     const fileName = `report_${taskId}_${randomUUID()}.pdf`;
-    const filePath = join(uploadDir, fileName);
+    const filePath = join(taskDir, fileName);
 
     logger.info(`开始生成 PDF 文件: ${filePath}`);
 

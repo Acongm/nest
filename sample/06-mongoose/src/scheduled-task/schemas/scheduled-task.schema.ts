@@ -30,8 +30,8 @@ export type ScheduledTaskDocument = ScheduledTask & Document;
 
 @Schema({ collection: 'scheduled_tasks', timestamps: true })
 export class ScheduledTask {
-  /** 任务唯一标识符 */
-  @Prop({ required: true, unique: true, type: String })
+  /** 任务唯一标识符（与 tenantId 组合唯一） */
+  @Prop({ required: true, type: String })
   id: string;
 
   /** 租户ID */
