@@ -116,12 +116,11 @@ export class ReportExportOfficeService {
       ? ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', this.workerPath]
       : [this.workerPath];
 
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       NODE_ENV: process.env.NODE_ENV || 'development',
     };
 
-    // 设置时区环境变量
     if (timezone) {
       env.TZ = timezone;
     }
