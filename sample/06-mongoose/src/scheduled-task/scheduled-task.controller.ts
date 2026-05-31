@@ -1,4 +1,4 @@
-import { Get, Put, Body, Controller, Req, Param } from '@nestjs/common';
+import { Get, Put, Post, Body, Controller, Req, Param } from '@nestjs/common';
 import { Request } from 'express';
 import { ScheduledTaskService } from './scheduled-task.service';
 import { CreateScheduledTaskDto } from './dto';
@@ -78,5 +78,29 @@ export class ScheduledTaskController {
     const tenantId = reqRequest.user.tenantId;
 
     return await this.scheduledTaskService.getTaskStatus(taskId, tenantId);
+  }
+
+  /**
+   * 立即触发执行指定任务（用于测试）
+   * @route POST /scheduled-tasks/:taskId/trigger
+   * @param taskId 任务ID
+   * @returns 触发结果
+   */
+  @Post(':taskId/trigger')
+  async triggerTask(
+    @Req() reqRequest: Request,
+    @Param('taskId') taskId: string,
+  ): Promise<{ message: string; taskId: string }> {
+    if (!isCurrentUserData(reqRequest.user)) {
+      throw new Error('用户未认证');
+    }
+    const tenantId = reqRequest.user.tenantId;
+
+    await this.scheduledTaskService.triggerTaskExecution(taskId, tenantId);
+
+    return {
+      message: '任务已触发执行',
+      taskId,
+    };
   }
 }

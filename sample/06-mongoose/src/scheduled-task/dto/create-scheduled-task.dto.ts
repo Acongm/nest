@@ -90,4 +90,12 @@ export class CreateScheduledTaskDto {
   @IsArray()
   @IsString({ each: true })
   branchIds?: string[];
+
+  /** 
+   * 时区（IANA 时区标识符，如 Asia/Shanghai, America/New_York）
+   * 可选，默认为 Asia/Shanghai
+   */
+  @IsOptional()
+  @IsString()
+  timezone?: string;
 }

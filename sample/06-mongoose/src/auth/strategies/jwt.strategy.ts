@@ -6,11 +6,12 @@ import { Request } from 'express';
 import { AuthService } from '../auth.service';
 
 export interface JwtPayload {
-  userId: string;
+  userId: string; // 用户ID（实际上是 _id）
   tenantId: string;
   companyId: string;
   username: string;
-  sub: string; // user id
+  roles: string[]; // 用户角色列表
+  sub: string; // user id (MongoDB _id)
 }
 
 @Injectable()
@@ -40,11 +41,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     // 返回的用户信息会被附加到 request.user
     return {
-      userId: payload.userId,
+      userId: payload.userId, // 使用 _id 作为 userId
       tenantId: payload.tenantId,
       companyId: payload.companyId,
       username: payload.username,
-      id: payload.sub,
+      roles: payload.roles || [], // 用户角色
+      id: payload.sub, // MongoDB _id
     };
   }
 }

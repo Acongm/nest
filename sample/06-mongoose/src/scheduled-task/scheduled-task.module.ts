@@ -5,12 +5,10 @@ import { ScheduledTaskService } from './scheduled-task.service';
 import { ScheduledTaskController } from './scheduled-task.controller';
 import { ScheduledTaskSchedulerService } from './scheduled-task-scheduler.service';
 import { ScheduledTaskEmailService } from './scheduled-task-email.service';
-import { TaskExecutionRecordService } from './task-execution-record.service';
-import { TaskExecutionRecordController } from './task-execution-record.controller';
 import { ScheduledTask, ScheduledTaskSchema } from './schemas/scheduled-task.schema';
-import { TaskExecutionRecord, TaskExecutionRecordSchema } from './schemas/task-execution-record.schema';
 import { ReportExportModule } from '../report-export/report-export.module';
-import { EmailService } from '../common/email.service';
+import { TaskExecutionRecordModule } from '../task-execution-record/task-execution-record.module';
+import { CommonModule } from '../common/common.module';
 
 /**
  * 定时任务模块
@@ -20,20 +18,19 @@ import { EmailService } from '../common/email.service';
 @Module({
   imports: [
     MongooseModule.forFeature([
-      { name: ScheduledTask.name, schema: ScheduledTaskSchema },
-      { name: TaskExecutionRecord.name, schema: TaskExecutionRecordSchema }
+      { name: ScheduledTask.name, schema: ScheduledTaskSchema }
     ]),
     ScheduleModule.forRoot(),
     forwardRef(() => ReportExportModule),
+    TaskExecutionRecordModule,
+    CommonModule,
   ],
   providers: [
     ScheduledTaskService,
     ScheduledTaskSchedulerService,
     ScheduledTaskEmailService,
-    TaskExecutionRecordService,
-    EmailService,
   ],
-  controllers: [ScheduledTaskController, TaskExecutionRecordController],
+  controllers: [ScheduledTaskController],
   exports: [ScheduledTaskService, ScheduledTaskSchedulerService],
 })
 export class ScheduledTaskModule {}
