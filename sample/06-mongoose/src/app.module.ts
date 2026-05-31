@@ -5,6 +5,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { CatsModule } from './cats/cats.module';
 import { ScheduledTaskModule } from './scheduled-task/scheduled-task.module';
 import { ReportExportModule } from './report-export/report-export.module';
+import { ReportExportNoDatabaseModule } from './report-export/report-export-no-database.module';
 import { AuthModule } from './auth/auth.module';
 import { CommonModule } from './common/common.module';
 import { TaskExecutionRecordModule } from './task-execution-record/task-execution-record.module';
@@ -36,6 +37,8 @@ const databaseImports = databaseEnabled
     ]
   : [];
 
+const noDatabaseImports = databaseEnabled ? [] : [ReportExportNoDatabaseModule];
+
 const authProviders = databaseEnabled
   ? [
       {
@@ -53,6 +56,7 @@ const authProviders = databaseEnabled
       envFilePath: ['.env.local', '.env'], // 支持本地覆盖配置
     }),
     ...databaseImports,
+    ...noDatabaseImports,
   ],
   controllers: [AppController],
   providers: [...authProviders],

@@ -6,7 +6,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/index.ts": {
-      "maxDuration": 10,
+      "maxDuration": 60,
       "memory": 1024,
       "includeFiles": "public/**"
     }
