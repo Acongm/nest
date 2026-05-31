@@ -31,7 +31,7 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.2.10",
     "@nestjs/schedule": "^3.0.4",
-    "@sparticuz/chromium": "^149.0.0",
+    "@sparticuz/chromium": "138.0.2",
     "@types/bcrypt": "^5.0.2",
     "@types/cookie-parser": "^1.4.9",
     "@types/nodemailer": "^7.0.3",
