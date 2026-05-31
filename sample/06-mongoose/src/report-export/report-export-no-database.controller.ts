@@ -15,7 +15,15 @@ export class ReportExportNoDatabaseController {
     @Body() data: CreateExportTaskDto,
     @Res() res: Response,
   ) {
-    const pdfBuffer = await this.reportExportDirectService.exportToPdfBuffer(data);
+    let pdfBuffer: Buffer;
+
+    try {
+      pdfBuffer = await this.reportExportDirectService.exportToPdfBuffer(data);
+    } catch (error) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        message: error.message || 'PDF 导出失败',
+      });
+    }
 
     res.status(HttpStatus.CREATED);
     res.setHeader('Content-Type', 'application/pdf');
