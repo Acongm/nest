@@ -60,7 +60,7 @@ export abstract class AbstractInstanceResolver {
     const pluckInstance = async (instanceLink: InstanceLink) => {
       const { wrapperRef, collection } = instanceLink;
       if (wrapperRef.isDependencyTreeStatic() && !wrapperRef.isTransient) {
-        return wrapperRef.instance;
+        return this.get(typeOrToken, { strict: options?.strict });
       }
 
       const ctorHost = wrapperRef.instance || { constructor: typeOrToken };

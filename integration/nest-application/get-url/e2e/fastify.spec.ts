@@ -2,7 +2,7 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { Test, TestingModule } from '@nestjs/testing';
 import { expect } from 'chai';
 import { AppModule } from '../src/app.module';
-import { getAvailableIpv4Host, randomPort } from './utils';
+import { randomPort } from './utils';
 
 describe('Get URL (Fastify Application)', () => {
   let testModule: TestingModule;
@@ -20,9 +20,8 @@ describe('Get URL (Fastify Application)', () => {
 
   it('should be able to get the IPv4 address', async () => {
     const app = testModule.createNestApplication(new FastifyAdapter());
-    const host = await getAvailableIpv4Host();
-    await app.listen(port, host);
-    expect(await app.getUrl()).to.be.eql(`http://${host}:${port}`);
+    await app.listen(port, '127.0.0.5');
+    expect(await app.getUrl()).to.be.eql(`http://127.0.0.5:${port}`);
     await app.close();
   });
   it('should return 127.0.0.1 for 0.0.0.0', async () => {

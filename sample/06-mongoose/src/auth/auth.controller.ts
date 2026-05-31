@@ -80,7 +80,6 @@ export class AuthController {
       tenantId: reqRequest.user.tenantId,
       companyId: reqRequest.user.companyId,
       username: reqRequest.user.username,
-      roles: (reqRequest.user as any).roles || [], // 用户角色
     };
   }
 }

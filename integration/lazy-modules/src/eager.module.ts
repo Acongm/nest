@@ -1,4 +1,4 @@
-import { Injectable, Module } from '@nestjs/common';
+import { Module, Injectable } from '@nestjs/common';
 import { GlobalService } from './global.module';
 
 @Injectable()

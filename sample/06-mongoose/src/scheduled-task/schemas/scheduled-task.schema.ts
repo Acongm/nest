@@ -30,8 +30,8 @@ export type ScheduledTaskDocument = ScheduledTask & Document;
 
 @Schema({ collection: 'scheduled_tasks', timestamps: true })
 export class ScheduledTask {
-  /** 任务唯一标识符（与 tenantId 组合唯一） */
-  @Prop({ required: true, type: String })
+  /** 任务唯一标识符 */
+  @Prop({ required: true, unique: true, type: String })
   id: string;
 
   /** 租户ID */
@@ -65,14 +65,6 @@ export class ScheduledTask {
   /** Cron 表达式 */
   @Prop({ required: true, type: String })
   cronExpression: string;
-
-  /** 时区（IANA 时区标识符，如 Asia/Shanghai, America/New_York） */
-  @Prop({ 
-    required: false, 
-    type: String, 
-    default: process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai' 
-  })
-  timezone?: string;
 
   /** 创建时间 */
   @Prop({ type: Date, default: Date.now })

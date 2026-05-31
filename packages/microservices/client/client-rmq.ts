@@ -14,7 +14,6 @@ import {
 } from 'rxjs';
 import { first, map, retryWhen, scan, skip, switchMap } from 'rxjs/operators';
 import {
-  BLOCKED_RMQ_MESSAGE,
   DISCONNECTED_RMQ_MESSAGE,
   RQM_DEFAULT_IS_GLOBAL_PREFETCH_COUNT,
   RQM_DEFAULT_NO_ASSERT,
@@ -24,7 +23,6 @@ import {
   RQM_DEFAULT_QUEUE,
   RQM_DEFAULT_QUEUE_OPTIONS,
   RQM_DEFAULT_URL,
-  UNBLOCKED_RMQ_MESSAGE,
 } from '../constants';
 import { RmqEvents, RmqEventsMap, RmqStatus } from '../events/rmq.events';
 import { ReadPacket, RmqOptions, WritePacket } from '../interfaces';
@@ -115,8 +113,6 @@ export class ClientRMQ extends ClientProxy<RmqEvents, RmqStatus> {
     this.registerErrorListener(this.client);
     this.registerDisconnectListener(this.client);
     this.registerConnectListener(this.client);
-    this.registerBlockedListener(this.client);
-    this.registerUnblockedListener(this.client);
     this.pendingEventListeners.forEach(({ event, callback }) =>
       this.client!.on(event, callback),
     );
@@ -295,23 +291,6 @@ export class ClientRMQ extends ClientProxy<RmqEvents, RmqStatus> {
     });
   }
 
-  public registerBlockedListener(client: AmqpConnectionManager): void {
-    client.addListener(
-      RmqEventsMap.BLOCKED,
-      ({ reason }: { reason: string }) => {
-        this._status$.next(RmqStatus.BLOCKED);
-        this.logger.warn(BLOCKED_RMQ_MESSAGE(reason));
-      },
-    );
-  }
-
-  public registerUnblockedListener(client: AmqpConnectionManager): void {
-    client.addListener(RmqEventsMap.UNBLOCKED, () => {
-      this._status$.next(RmqStatus.UNBLOCKED);
-      this.logger.log(UNBLOCKED_RMQ_MESSAGE);
-    });
-  }
-
   public on<
     EventKey extends keyof RmqEvents = keyof RmqEvents,
     EventCallback extends RmqEvents[EventKey] = RmqEvents[EventKey],
@@ -359,7 +338,7 @@ export class ClientRMQ extends ClientProxy<RmqEvents, RmqStatus> {
       options,
     );
     if (isDisposed || err) {
-      return callback?.({
+      callback?.({
         err,
         response,
         isDisposed: true,

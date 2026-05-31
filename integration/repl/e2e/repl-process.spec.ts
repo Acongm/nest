@@ -1,14 +1,7 @@
 import { expect } from 'chai';
 import { spawn } from 'child_process';
-import { join } from 'path';
 
 const PROMPT = '> ';
-const workspaceRoot = join(__dirname, '../../..');
-const localPackageResolver = join(
-  workspaceRoot,
-  'integration/_support/register-local-packages.ts',
-);
-const replEntrypoint = join(__dirname, '../src/repl.ts');
 
 describe('REPL process', function () {
   let replProcess: ReturnType<typeof spawn>;
@@ -44,26 +37,7 @@ describe('REPL process', function () {
 
   beforeEach(async function () {
     this.timeout(15000);
-    replProcess = spawn(
-      process.execPath,
-      [
-        '-r',
-        'ts-node/register/transpile-only',
-        '-r',
-        localPackageResolver,
-        replEntrypoint,
-      ],
-      {
-        cwd: workspaceRoot,
-        env: {
-          ...process.env,
-          TS_NODE_PROJECT: join(
-            workspaceRoot,
-            'integration/repl/tsconfig.json',
-          ),
-        },
-      },
-    );
+    replProcess = spawn('ts-node', ['../src/repl.ts'], { cwd: __dirname });
     await waitForReplToStart(replProcess, PROMPT);
   });
 

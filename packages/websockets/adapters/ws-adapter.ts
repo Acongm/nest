@@ -14,7 +14,8 @@ export abstract class AbstractWsAdapter<
   TServer extends BaseWsInstance = any,
   TClient extends BaseWsInstance = any,
   TOptions = any,
-> implements WebSocketAdapter<TServer, TClient, TOptions> {
+> implements WebSocketAdapter<TServer, TClient, TOptions>
+{
   protected readonly httpServer: any;
   private _forceCloseConnections: boolean;
 

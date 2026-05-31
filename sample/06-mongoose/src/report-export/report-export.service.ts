@@ -1,24 +1,18 @@
 import { Injectable, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { InjectConnection } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
-import { GridFSBucket } from 'mongodb';
 import { CreateExportTaskDto } from './dto/create-export-task.dto';
 import { ExportTask, ExportTaskStatus } from './schemas/export-task.schema';
 import { join } from 'path';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, rmdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 const pLimit = require('p-limit');
 import { logger } from '../common/logger';
 
 @Injectable()
 export class ReportExportService {
-  // 当日最大导出次数（从环境变量读取，默认 10 次）
-  private readonly MAX_DAILY_EXPORTS = parseInt(
-    process.env.MAX_DAILY_EXPORTS || '10',
-    10,
-  );
+  // 当日最大导出次数
+  private readonly MAX_DAILY_EXPORTS = 10;
   // 文件存储目录
   private readonly UPLOAD_DIR = join(process.cwd(), 'uploads', 'reports');
   // 基础URL（用于生成下载链接）
@@ -34,34 +28,14 @@ export class ReportExportService {
     process.env.EXPORT_TASK_TIMEOUT || '300000',
     10,
   );
-  // GridFS 存储大小限制（字节），默认 1GB
-  private readonly MAX_STORAGE_SIZE = parseInt(
-    process.env.MAX_STORAGE_SIZE || '1073741824',
-    10,
-  );
-  // 当超过存储限制时，清理比例（0-1），默认清理 30%
-  private readonly CLEANUP_RATIO = parseFloat(
-    process.env.CLEANUP_RATIO || '0.3',
-  );
-  // GridFS bucket 名称
-  private readonly GRIDFS_BUCKET_NAME = 'export_files';
   // 并发限制器
   private readonly limit = pLimit(this.MAX_CONCURRENT_EXPORTS);
   // Worker 进程路径（根据环境自动选择）
   private readonly workerPath = this.getWorkerPath();
-  // GridFS bucket 实例
-  private gridFSBucket: GridFSBucket;
 
   constructor(
     @InjectModel(ExportTask.name) private exportTaskModel: Model<ExportTask>,
-    @InjectConnection() private connection: Connection,
   ) {
-    // 初始化 GridFS bucket
-    // 使用 connection.db 作为 any 类型来避免类型不匹配问题
-    this.gridFSBucket = new GridFSBucket(this.connection.db as any, {
-      bucketName: this.GRIDFS_BUCKET_NAME,
-    });
-    
     // 确保上传目录存在
     if (!existsSync(this.UPLOAD_DIR)) {
       mkdirSync(this.UPLOAD_DIR, { recursive: true });
@@ -73,92 +47,33 @@ export class ReportExportService {
     }
     logger.info('报表导出服务初始化完成', {
       maxConcurrent: this.MAX_CONCURRENT_EXPORTS,
-      maxDailyExports: this.MAX_DAILY_EXPORTS,
       uploadDir: this.UPLOAD_DIR,
       taskTimeout: this.TASK_TIMEOUT,
-      maxStorageSize: this.MAX_STORAGE_SIZE,
-      cleanupRatio: this.CLEANUP_RATIO,
     });
   }
 
   /**
    * 创建导出任务
-   * 如果提供了 branchIds，会为每个 branchId 创建一个导出任务
-   * @param createDto 创建导出任务DTO
-   * @param tenantId 租户ID
-   * @returns 如果提供了 branchIds，返回所有创建的任务数组；否则返回单个任务
    */
-  async createExportTask(createDto: CreateExportTaskDto, tenantId: string): Promise<ExportTask | ExportTask[]> {
+  async createExportTask(createDto: CreateExportTaskDto, tenantId: string): Promise<ExportTask> {
     // 1. 验证参数
     this.validateParams(createDto);
 
-    // 2. 如果提供了 branchIds，为每个 branchId 创建导出任务
-    if (createDto.branchIds && createDto.branchIds.length > 0) {
-      const tasks: ExportTask[] = [];
-      
-      for (const branchId of createDto.branchIds) {
-        // 为每个 branchId 检查当日导出次数
-        await this.checkDailyExportLimit(branchId, tenantId);
+    // 2. 检查当日导出次数（按租户和资产ID）
+    await this.checkDailyExportLimit(createDto.assetId, tenantId);
 
-        // 构建该 branchId 对应的 reportPage
-        const reportPage = this.buildReportPageForBranch(createDto.reportPage, branchId);
-
-        // 创建任务记录（状态：待处理）
-        const task = new this.exportTaskModel({
-          startTime: new Date(createDto.startTime),
-          endTime: new Date(createDto.endTime),
-          assetId: branchId,
-          reportPage,
-          taskName: createDto.taskName,
-          tenantId,
-          status: ExportTaskStatus.PENDING,
-        });
-        const savedTask = await task.save();
-        tasks.push(savedTask);
-
-        // 使用并发限制器异步执行导出任务（不阻塞响应）
-        this.limit(() => this.processExportTask(savedTask._id.toString())).catch(
-          (error) => {
-            logger.error('导出任务执行失败', {
-              taskId: savedTask._id.toString(),
-              branchId,
-              error: error.message,
-              stack: error.stack,
-            });
-          },
-        );
-      }
-
-      logger.info('批量创建导出任务完成', {
-        branchIdsCount: createDto.branchIds.length,
-        tasksCount: tasks.length,
-        taskIds: tasks.map(t => t._id.toString()),
-      });
-
-      // 返回所有任务数组
-      return tasks;
-    }
-
-    // 3. 单个任务创建逻辑（当 branchIds 为空或未提供时）
-    // 如果没有提供 assetId，使用 reportPage 作为默认 assetId
-    const assetId = createDto.assetId || createDto.reportPage || 'default';
-    
-    // 检查当日导出次数（按租户和资产ID）
-    await this.checkDailyExportLimit(assetId, tenantId);
-
-    // 创建任务记录（状态：待处理）
+    // 3. 创建任务记录（状态：待处理）
     const task = new this.exportTaskModel({
+      ...createDto,
+      tenantId, // 添加租户ID
       startTime: new Date(createDto.startTime),
       endTime: new Date(createDto.endTime),
-      assetId,
-      reportPage: createDto.reportPage,
-      taskName: createDto.taskName,
-      tenantId, // 添加租户ID
       status: ExportTaskStatus.PENDING,
     });
     const savedTask = await task.save();
 
-    // 使用并发限制器异步执行导出任务（不阻塞响应）
+    // 4. 使用并发限制器异步执行导出任务（不阻塞响应）
+    // 这样可以控制同时运行的浏览器实例数量，避免服务器崩溃
     this.limit(() => this.processExportTask(savedTask._id.toString())).catch(
       (error) => {
         logger.error('导出任务执行失败', {
@@ -170,25 +85,6 @@ export class ReportExportService {
     );
 
     return savedTask;
-  }
-
-  /**
-   * 为分支ID构建报表页面URL
-   * @param reportPage 原始报表页面URL或路径
-   * @param branchId 分支ID
-   * @returns 构建后的报表页面URL
-   */
-  private buildReportPageForBranch(reportPage: string, branchId: string): string {
-    // 如果 reportPage 已经是完整 URL，添加 branchId 参数
-    try {
-      const url = new URL(reportPage);
-      url.searchParams.set('branchId', branchId);
-      return url.toString();
-    } catch {
-      // 如果是相对路径，添加 branchId 参数
-      const separator = reportPage.includes('?') ? '&' : '?';
-      return `${reportPage}${separator}branchId=${branchId}`;
-    }
   }
 
   /**
@@ -213,8 +109,6 @@ export class ReportExportService {
     if (!this.isValidUrl(dto.reportPage) && !dto.reportPage.startsWith('/')) {
       throw new BadRequestException('报表页面必须是有效的URL或路径');
     }
-
-    // 允许 branchIds 为空数组，此时如果没有 assetId，会在 createExportTask 中使用默认值
   }
 
   /**
@@ -237,7 +131,7 @@ export class ReportExportService {
 
     if (todayExports >= this.MAX_DAILY_EXPORTS) {
       throw new BadRequestException(
-        `当日导出次数已达上限（${todayExports}/${this.MAX_DAILY_EXPORTS}次），请明天再试`,
+        `当日导出次数已达上限（${this.MAX_DAILY_EXPORTS}次），请明天再试`,
       );
     }
   }
@@ -250,9 +144,6 @@ export class ReportExportService {
     if (!task) {
       throw new Error('任务不存在');
     }
-
-    let absoluteFilePath: string | null = null;
-    let taskDir: string | null = null;
 
     try {
       // 更新状态为处理中
@@ -273,7 +164,7 @@ export class ReportExportService {
       });
 
       // 使用子进程导出PDF（带超时控制）
-      absoluteFilePath = await Promise.race([
+      const filePath = await Promise.race([
         this.exportToPdfViaWorker(reportUrl, taskId),
         new Promise<never>((_, reject) =>
           setTimeout(
@@ -283,32 +174,18 @@ export class ReportExportService {
         ),
       ]);
 
-      // 读取文件并存储到 GridFS
-      const fileBuffer = readFileSync(absoluteFilePath);
-      const fileSize = fileBuffer.length;
-      const fileId = await this.storeFileToGridFS(fileBuffer, taskId, fileSize);
-
-      // 检查存储大小限制，如果超过则清理旧文件
-      await this.checkAndCleanupStorage();
-
-      // 删除临时文件夹
-      taskDir = join(this.UPLOAD_DIR, taskId);
-      this.deleteTaskDirectory(taskDir);
-
       // 生成下载URL
       const downloadUrl = `/api/report-export/download/${taskId}`;
 
       // 更新任务状态为已完成
       task.status = ExportTaskStatus.COMPLETED;
-      task.fileId = fileId.toString();
-      task.fileSize = fileSize;
+      task.filePath = filePath;
       task.downloadUrl = downloadUrl;
       await task.save();
 
       logger.info('导出任务完成', {
         taskId,
-        fileId,
-        fileSize,
+        filePath,
         downloadUrl,
       });
     } catch (error) {
@@ -317,220 +194,12 @@ export class ReportExportService {
       task.errorMessage = error.message || '导出失败';
       await task.save();
 
-      // 清理临时文件
-      if (taskDir) {
-        this.deleteTaskDirectory(taskDir);
-      } else if (absoluteFilePath) {
-        // 如果 taskDir 不存在，尝试删除单个文件
-        try {
-          if (existsSync(absoluteFilePath)) {
-            unlinkSync(absoluteFilePath);
-          }
-        } catch (cleanupError) {
-          logger.warn('清理临时文件失败', {
-            taskId,
-            filePath: absoluteFilePath,
-            error: cleanupError.message,
-          });
-        }
-      }
-
       logger.error('导出任务失败', {
         taskId,
         error: error.message,
         stack: error.stack,
       });
       throw error;
-    }
-  }
-
-  /**
-   * 存储文件到 GridFS
-   */
-  private async storeFileToGridFS(
-    fileBuffer: Buffer,
-    taskId: string,
-    fileSize: number,
-  ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const uploadStream = this.gridFSBucket.openUploadStream(`report_${taskId}.pdf`, {
-        metadata: {
-          taskId,
-          uploadedAt: new Date(),
-        },
-      });
-
-      uploadStream.on('error', (error) => {
-        logger.error('GridFS 上传失败', { taskId, error: error.message });
-        reject(error);
-      });
-
-      uploadStream.on('finish', () => {
-        const fileId = uploadStream.id.toString();
-        logger.info('文件已存储到 GridFS', { taskId, fileId, fileSize });
-        resolve(fileId);
-      });
-
-      uploadStream.end(fileBuffer);
-    });
-  }
-
-  /**
-   * 从 GridFS 读取文件
-   */
-  async getFileFromGridFS(fileId: string): Promise<Buffer> {
-    const { ObjectId } = require('mongodb');
-    return new Promise((resolve, reject) => {
-      const downloadStream = this.gridFSBucket.openDownloadStream(
-        new ObjectId(fileId),
-      );
-
-      const chunks: Buffer[] = [];
-
-      downloadStream.on('data', (chunk: Buffer) => {
-        chunks.push(chunk);
-      });
-
-      downloadStream.on('error', (error) => {
-        logger.error('GridFS 读取失败', { fileId, error: error.message });
-        reject(error);
-      });
-
-      downloadStream.on('end', () => {
-        resolve(Buffer.concat(chunks));
-      });
-    });
-  }
-
-  /**
-   * 获取当前存储大小
-   */
-  private async getCurrentStorageSize(): Promise<number> {
-    const filesCollection = this.connection.db.collection(
-      this.GRIDFS_BUCKET_NAME + '.files',
-    );
-    const result = await filesCollection.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalSize: { $sum: '$length' },
-        },
-      },
-    ]).toArray();
-
-    return result.length > 0 ? result[0].totalSize : 0;
-  }
-
-  /**
-   * 检查存储大小并清理旧文件
-   */
-  private async checkAndCleanupStorage(): Promise<void> {
-    const currentSize = await this.getCurrentStorageSize();
-    
-    if (currentSize <= this.MAX_STORAGE_SIZE) {
-      return;
-    }
-
-    logger.info('存储大小超过限制，开始清理', {
-      currentSize,
-      maxSize: this.MAX_STORAGE_SIZE,
-      cleanupRatio: this.CLEANUP_RATIO,
-    });
-
-    // 计算需要清理的大小
-    const targetSize = this.MAX_STORAGE_SIZE * (1 - this.CLEANUP_RATIO);
-    const needToFree = currentSize - targetSize;
-
-    // 获取所有已完成的任务，按创建时间排序（最旧的优先）
-    const oldTasks = await this.exportTaskModel
-      .find({
-        status: ExportTaskStatus.COMPLETED,
-        fileId: { $exists: true, $ne: null },
-      })
-      .sort({ createdAt: 1 })
-      .exec();
-
-    let freedSize = 0;
-    const deletedFileIds: string[] = [];
-
-    for (const task of oldTasks) {
-      if (freedSize >= needToFree) {
-        break;
-      }
-
-      if (task.fileId) {
-        const fileIdToDelete = task.fileId;
-        try {
-          // 获取文件信息
-          const { ObjectId } = require('mongodb');
-          const filesCollection = this.connection.db.collection(
-            this.GRIDFS_BUCKET_NAME + '.files',
-          );
-          const fileInfo = await filesCollection.findOne({
-            _id: new ObjectId(fileIdToDelete),
-          });
-
-          if (fileInfo) {
-            const fileSizeToDelete = fileInfo.length || 0;
-            
-            // 删除 GridFS 文件
-            await this.gridFSBucket.delete(new ObjectId(fileIdToDelete));
-            
-            freedSize += fileSizeToDelete;
-            deletedFileIds.push(fileIdToDelete);
-
-            // 更新任务记录
-            task.fileId = undefined;
-            task.fileSize = undefined;
-            await task.save();
-
-            logger.info('已删除旧文件', {
-              taskId: task._id.toString(),
-              fileId: fileIdToDelete,
-              fileSize: fileSizeToDelete,
-            });
-          }
-        } catch (error) {
-          logger.error('删除文件失败', {
-            taskId: task._id.toString(),
-            fileId: fileIdToDelete,
-            error: error.message,
-          });
-        }
-      }
-    }
-
-    logger.info('存储清理完成', {
-      freedSize,
-      deletedCount: deletedFileIds.length,
-      remainingSize: currentSize - freedSize,
-    });
-  }
-
-  /**
-   * 删除任务临时目录
-   */
-  private deleteTaskDirectory(taskDir: string): void {
-    try {
-      if (existsSync(taskDir)) {
-        // 删除目录下的所有文件
-        const fs = require('fs');
-        const files = fs.readdirSync(taskDir);
-        for (const file of files) {
-          const filePath = join(taskDir, file);
-          if (statSync(filePath).isFile()) {
-            unlinkSync(filePath);
-          }
-        }
-        // 删除目录
-        rmdirSync(taskDir);
-        logger.info('已删除临时导出文件夹', { taskDir });
-      }
-    } catch (error) {
-      logger.warn('删除临时文件夹失败', {
-        taskDir,
-        error: error.message,
-      });
     }
   }
 
@@ -567,200 +236,115 @@ export class ReportExportService {
         workerPath: this.workerPath,
       });
 
-      const worker = this.spawnWorkerProcess();
-      const timeout = this.setupWorkerTimeout(worker, taskId, reject);
-      const dataCollectors = this.setupWorkerDataCollectors(worker, taskId);
+      // 准备 spawn 参数
+      const isTsFile = this.workerPath.endsWith('.ts');
+      const nodeExecutable = process.execPath; // Node.js 可执行文件路径
+      const args = isTsFile
+        ? ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', this.workerPath]
+        : [this.workerPath];
 
-      this.setupWorkerExitHandler(
-        worker,
-        timeout,
-        dataCollectors,
-        taskId,
-        resolve,
-        reject,
-      );
-      this.setupWorkerErrorHandler(worker, timeout, taskId, reject);
-      this.sendTaskDataToWorker(worker, taskId, url);
-    });
-  }
-
-  /**
-   * 启动 Worker 子进程
-   */
-  private spawnWorkerProcess(): ChildProcess {
-    const isTsFile = this.workerPath.endsWith('.ts');
-    const nodeExecutable = process.execPath;
-    const args = isTsFile
-      ? ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', this.workerPath]
-      : [this.workerPath];
-
-    return spawn(nodeExecutable, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        NODE_ENV: process.env.NODE_ENV || 'development',
-      },
-    });
-  }
-
-  /**
-   * 设置 Worker 超时
-   */
-  private setupWorkerTimeout(
-    worker: ChildProcess,
-    taskId: string,
-    reject: (reason: any) => void,
-  ): NodeJS.Timeout {
-    return setTimeout(() => {
-      logger.error('Worker 进程超时', { taskId });
-      worker.kill('SIGTERM');
-      reject(new Error(`Worker 进程超时（${this.TASK_TIMEOUT / 1000}秒）`));
-    }, this.TASK_TIMEOUT);
-  }
-
-  /**
-   * 设置 Worker 数据收集器
-   */
-  private setupWorkerDataCollectors(
-    worker: ChildProcess,
-    taskId: string,
-  ): { stdoutData: string; stderrData: string } {
-    const dataCollectors = {
-      stdoutData: '',
-      stderrData: '',
-    };
-
-    worker.stdout?.on('data', (data: Buffer) => {
-      dataCollectors.stdoutData += data.toString();
-    });
-
-    worker.stderr?.on('data', (data: Buffer) => {
-      dataCollectors.stderrData += data.toString();
-      logger.debug('Worker stderr', { taskId, data: data.toString() });
-    });
-
-    return dataCollectors;
-  }
-
-  /**
-   * 设置 Worker 退出处理器
-   */
-  private setupWorkerExitHandler(
-    worker: ChildProcess,
-    timeout: NodeJS.Timeout,
-    dataCollectors: { stdoutData: string; stderrData: string },
-    taskId: string,
-    resolve: (value: string) => void,
-    reject: (reason: any) => void,
-  ): void {
-    worker.on('exit', (code, signal) => {
-      clearTimeout(timeout);
-
-      if (code === 0) {
-        this.handleWorkerSuccess(dataCollectors.stdoutData, taskId, resolve, reject);
-      } else {
-        this.handleWorkerFailure(code, signal, dataCollectors.stderrData, taskId, reject);
-      }
-    });
-  }
-
-  /**
-   * 处理 Worker 成功退出
-   */
-  private handleWorkerSuccess(
-    stdoutData: string,
-    taskId: string,
-    resolve: (value: string) => void,
-    reject: (reason: any) => void,
-  ): void {
-    try {
-      const lines = stdoutData.trim().split('\n');
-      const lastLine = lines[lines.length - 1];
-      const result = JSON.parse(lastLine);
-
-      if (result.type === 'success') {
-        logger.info('Worker 进程完成', {
-          taskId,
-          filePath: result.filePath,
-        });
-        resolve(result.filePath);
-      } else if (result.type === 'error') {
-        logger.error('Worker 进程失败', {
-          taskId,
-          error: result.error,
-        });
-        reject(new Error(result.error || 'PDF 导出失败'));
-      } else {
-        reject(new Error('未知的响应类型'));
-      }
-    } catch (error) {
-      logger.error('解析 Worker 输出失败', {
-        taskId,
-        error: error.message,
-        stdout: stdoutData,
+      // 使用 spawn 启动子进程
+      const worker: ChildProcess = spawn(nodeExecutable, args, {
+        stdio: ['pipe', 'pipe', 'pipe'], // stdin, stdout, stderr
+        env: {
+          ...process.env,
+          NODE_ENV: process.env.NODE_ENV || 'development',
+        },
       });
-      reject(new Error(`解析 Worker 输出失败: ${error.message}`));
-    }
-  }
 
-  /**
-   * 处理 Worker 失败退出
-   */
-  private handleWorkerFailure(
-    code: number | null,
-    signal: string | null,
-    stderrData: string,
-    taskId: string,
-    reject: (reason: any) => void,
-  ): void {
-    logger.error('Worker 进程异常退出', {
-      taskId,
-      code,
-      signal,
-      stderr: stderrData,
-    });
-    reject(
-      new Error(`Worker 进程异常退出，退出码: ${code}，错误: ${stderrData}`),
-    );
-  }
+      // 设置超时
+      const timeout = setTimeout(() => {
+        logger.error('Worker 进程超时', { taskId });
+        worker.kill('SIGTERM');
+        reject(new Error(`Worker 进程超时（${this.TASK_TIMEOUT / 1000}秒）`));
+      }, this.TASK_TIMEOUT);
 
-  /**
-   * 设置 Worker 错误处理器
-   */
-  private setupWorkerErrorHandler(
-    worker: ChildProcess,
-    timeout: NodeJS.Timeout,
-    taskId: string,
-    reject: (reason: any) => void,
-  ): void {
-    worker.on('error', (error) => {
-      clearTimeout(timeout);
-      logger.error('Worker 进程错误', {
-        taskId,
-        error: error.message,
-        stack: error.stack,
+      let stdoutData = '';
+      let stderrData = '';
+
+      // 收集 stdout 数据
+      worker.stdout?.on('data', (data: Buffer) => {
+        stdoutData += data.toString();
       });
-      reject(error);
-    });
-  }
 
-  /**
-   * 向 Worker 发送任务数据
-   */
-  private sendTaskDataToWorker(
-    worker: ChildProcess,
-    taskId: string,
-    url: string,
-  ): void {
-    const taskData = JSON.stringify({
-      type: 'export-pdf',
-      taskId,
-      url,
-      uploadDir: this.UPLOAD_DIR,
-    });
+      // 收集 stderr 数据（可能包含日志输出）
+      worker.stderr?.on('data', (data: Buffer) => {
+        stderrData += data.toString();
+        // stderr 可能包含 winston 的日志输出，记录但不作为错误
+        logger.debug('Worker stderr', { taskId, data: data.toString() });
+      });
 
-    worker.stdin?.write(taskData + '\n');
-    worker.stdin?.end();
+      // 监听进程退出
+      worker.on('exit', (code, signal) => {
+        clearTimeout(timeout);
+
+        if (code === 0) {
+          try {
+            // 解析 JSON 输出（取最后一行，因为可能有日志输出）
+            const lines = stdoutData.trim().split('\n');
+            const lastLine = lines[lines.length - 1];
+            const result = JSON.parse(lastLine);
+
+            if (result.type === 'success') {
+              logger.info('Worker 进程完成', {
+                taskId,
+                filePath: result.filePath,
+              });
+              resolve(result.filePath);
+            } else if (result.type === 'error') {
+              logger.error('Worker 进程失败', {
+                taskId,
+                error: result.error,
+              });
+              reject(new Error(result.error || 'PDF 导出失败'));
+            } else {
+              reject(new Error('未知的响应类型'));
+            }
+          } catch (error) {
+            logger.error('解析 Worker 输出失败', {
+              taskId,
+              error: error.message,
+              stdout: stdoutData,
+            });
+            reject(new Error(`解析 Worker 输出失败: ${error.message}`));
+          }
+        } else {
+          logger.error('Worker 进程异常退出', {
+            taskId,
+            code,
+            signal,
+            stderr: stderrData,
+          });
+          reject(
+            new Error(
+              `Worker 进程异常退出，退出码: ${code}，错误: ${stderrData}`,
+            ),
+          );
+        }
+      });
+
+      // 监听进程错误
+      worker.on('error', (error) => {
+        clearTimeout(timeout);
+        logger.error('Worker 进程错误', {
+          taskId,
+          error: error.message,
+          stack: error.stack,
+        });
+        reject(error);
+      });
+
+      // 通过 stdin 发送任务数据
+      const taskData = JSON.stringify({
+        type: 'export-pdf',
+        taskId,
+        url,
+        uploadDir: this.UPLOAD_DIR,
+      });
+
+      worker.stdin?.write(taskData + '\n');
+      worker.stdin?.end();
+    });
   }
 
   /**
@@ -820,97 +404,14 @@ export class ReportExportService {
   }
 
   /**
-   * 获取任务文件（验证租户ID）
-   * 如果文件存储在 GridFS，返回文件 Buffer；否则返回文件路径（兼容旧数据）
-   */
-  async getTaskFile(taskId: string, tenantId: string): Promise<{ buffer?: Buffer; filePath?: string }> {
-    const task = await this.findOne(taskId, tenantId);
-    if (task.status !== ExportTaskStatus.COMPLETED) {
-      throw new HttpException('文件不存在或任务未完成', HttpStatus.NOT_FOUND);
-    }
-    
-    // 优先使用 GridFS
-    if (task.fileId) {
-      const buffer = await this.getFileFromGridFS(task.fileId);
-      return { buffer };
-    }
-    
-    // 兼容旧数据：从文件系统读取
-    if (task.filePath) {
-      const absolutePath = this.getAbsoluteFilePath(task.filePath);
-      return { filePath: absolutePath };
-    }
-    
-    throw new HttpException('文件不存在', HttpStatus.NOT_FOUND);
-  }
-
-  /**
    * 获取任务文件路径（验证租户ID）
-   * 返回绝对路径，用于读取文件（兼容旧方法）
-   * @deprecated 使用 getTaskFile 方法替代
    */
   async getTaskFilePath(taskId: string, tenantId: string): Promise<string> {
     const task = await this.findOne(taskId, tenantId);
     if (task.status !== ExportTaskStatus.COMPLETED || !task.filePath) {
       throw new HttpException('文件不存在或任务未完成', HttpStatus.NOT_FOUND);
     }
-    
-    // 将相对路径转换为绝对路径
-    return this.getAbsoluteFilePath(task.filePath);
-  }
-
-  /**
-   * 将绝对路径转换为相对路径（相对于 UPLOAD_DIR）
-   * @param absolutePath 绝对路径
-   * @returns 相对路径
-   */
-  private getRelativeFilePath(absolutePath: string): string {
-    // 如果路径已经是相对路径，直接返回
-    if (!absolutePath.startsWith('/') && !absolutePath.match(/^[A-Za-z]:/)) {
-      return absolutePath;
-    }
-    
-    // 获取相对于 UPLOAD_DIR 的路径
-    const normalizedUploadDir = this.UPLOAD_DIR.replace(/\\/g, '/');
-    const normalizedAbsolutePath = absolutePath.replace(/\\/g, '/');
-    
-    if (normalizedAbsolutePath.startsWith(normalizedUploadDir)) {
-      // 提取相对路径部分
-      const relativePath = normalizedAbsolutePath.substring(normalizedUploadDir.length);
-      // 移除开头的斜杠
-      return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-    }
-    
-    // 如果路径不在 UPLOAD_DIR 下，尝试提取文件名部分
-    // 格式：uploads/reports/report_xxx.pdf
-    const match = normalizedAbsolutePath.match(/uploads\/reports\/(.+)$/);
-    if (match) {
-      return `reports/${match[1]}`;
-    }
-    
-    // 如果无法转换，返回文件名
-    const fileName = absolutePath.split('/').pop() || absolutePath.split('\\').pop() || 'unknown.pdf';
-    return `reports/${fileName}`;
-  }
-
-  /**
-   * 将相对路径转换为绝对路径
-   * @param relativePath 相对路径
-   * @returns 绝对路径
-   */
-  private getAbsoluteFilePath(relativePath: string): string {
-    // 如果已经是绝对路径，直接返回
-    if (relativePath.startsWith('/') || relativePath.match(/^[A-Za-z]:/)) {
-      return relativePath;
-    }
-    
-    // 如果相对路径以 reports/ 开头，直接拼接
-    if (relativePath.startsWith('reports/')) {
-      return join(this.UPLOAD_DIR, relativePath.substring('reports/'.length));
-    }
-    
-    // 否则，假设是相对于 UPLOAD_DIR 的路径
-    return join(this.UPLOAD_DIR, relativePath);
+    return task.filePath;
   }
 
   /**

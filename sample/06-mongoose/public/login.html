@@ -121,112 +121,20 @@
         .register-link a:hover {
             text-decoration: underline;
         }
-        .login-type-switch {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 20px;
-            gap: 10px;
-        }
-        .switch-label {
-            font-size: 14px;
-            color: #666;
-            cursor: pointer;
-            user-select: none;
-        }
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 50px;
-            height: 24px;
-        }
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 24px;
-        }
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 18px;
-            width: 18px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        input:checked + .slider {
-            background-color: #667eea;
-        }
-        input:checked + .slider:before {
-            transform: translateX(26px);
-        }
-        .user-fields {
-            display: none;
-            animation: fadeIn 0.3s;
-        }
-        .user-fields.show {
-            display: block;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .help-text {
-            font-size: 12px;
-            color: #999;
-            margin-top: 5px;
-        }
     </style>
 </head>
 <body>
     <div class="login-container">
         <h1>🔐 用户登录</h1>
         <form id="loginForm">
-            <div class="login-type-switch">
-                <span class="switch-label">管理员</span>
-                <label class="switch">
-                    <input type="checkbox" id="loginTypeSwitch">
-                    <span class="slider"></span>
-                </label>
-                <span class="switch-label">普通用户</span>
-            </div>
-            
             <div class="form-group">
                 <label for="username">用户名</label>
                 <input type="text" id="username" required autocomplete="username" placeholder="请输入用户名">
             </div>
-            
-            <div class="form-group user-fields" id="userIdGroup">
-                <label for="userId">用户ID (userId)</label>
-                <input type="text" id="userId" autocomplete="off" placeholder="请输入用户ID（注册时返回的userId）">
-                <div class="help-text">注册时返回的 userId 值</div>
-            </div>
-            
-            <div class="form-group user-fields" id="tenantIdGroup">
-                <label for="tenantId">租户ID (tenantId)</label>
-                <input type="text" id="tenantId" autocomplete="off" placeholder="请输入租户ID">
-                <div class="help-text">您所属的租户ID</div>
-            </div>
-            
-            <div class="form-group" id="passwordGroup">
+            <div class="form-group">
                 <label for="password">密码</label>
-                <input type="password" id="password" autocomplete="current-password" placeholder="请输入密码">
-                <div class="help-text" id="passwordHelp">管理员登录需要密码</div>
+                <input type="password" id="password" required autocomplete="current-password" placeholder="请输入密码">
             </div>
-            
             <button type="submit" id="loginBtn">登录</button>
         </form>
         <div id="loginMessage"></div>
@@ -239,42 +147,6 @@
         const API_BASE = '/api';
         const AUTH_API = `${API_BASE}/auth`;
 
-        // 登录类型切换
-        const loginTypeSwitch = document.getElementById('loginTypeSwitch');
-        const userIdGroup = document.getElementById('userIdGroup');
-        const tenantIdGroup = document.getElementById('tenantIdGroup');
-        const userIdInput = document.getElementById('userId');
-        const tenantIdInput = document.getElementById('tenantId');
-
-        const passwordInput = document.getElementById('password');
-        const passwordGroup = document.getElementById('passwordGroup');
-        const passwordHelp = document.getElementById('passwordHelp');
-
-        // 切换登录模式
-        loginTypeSwitch.addEventListener('change', (e) => {
-            const isUserMode = e.target.checked;
-            
-            if (isUserMode) {
-                // 普通用户模式：显示 userId 和 tenantId 字段，密码不是必填
-                userIdGroup.classList.add('show');
-                tenantIdGroup.classList.add('show');
-                userIdInput.required = true;
-                tenantIdInput.required = true;
-                passwordInput.required = false; // 普通用户不需要密码
-                passwordHelp.textContent = '普通用户登录不需要密码';
-            } else {
-                // 管理员模式：隐藏 userId 和 tenantId 字段，密码必填
-                userIdGroup.classList.remove('show');
-                tenantIdGroup.classList.remove('show');
-                userIdInput.required = false;
-                tenantIdInput.required = false;
-                userIdInput.value = '';
-                tenantIdInput.value = '';
-                passwordInput.required = true; // 管理员需要密码
-                passwordHelp.textContent = '管理员登录需要密码';
-            }
-        });
-
         // 登录表单提交
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -283,43 +155,6 @@
             const loginMessage = document.getElementById('loginMessage');
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            const isUserMode = loginTypeSwitch.checked;
-            
-            // 构建登录请求体
-            const loginData = {
-                username,
-            };
-            
-            if (isUserMode) {
-                // 普通用户模式：username + userId + tenantId（不需要密码）
-                const userId = userIdInput.value.trim();
-                const tenantId = tenantIdInput.value.trim();
-                
-                if (!userId || !tenantId) {
-                    loginMessage.innerHTML = `
-                        <div class="error">
-                            ❌ 普通用户登录需要填写用户ID和租户ID
-                        </div>
-                    `;
-                    return;
-                }
-                
-                loginData.userId = userId;
-                loginData.tenantId = tenantId;
-                // 普通用户不需要密码
-            } else {
-                // 管理员模式：username + password（密码必填）
-                const password = passwordInput.value;
-                if (!password) {
-                    loginMessage.innerHTML = `
-                        <div class="error">
-                            ❌ 管理员登录需要填写密码
-                        </div>
-                    `;
-                    return;
-                }
-                loginData.password = password;
-            }
             
             loginBtn.disabled = true;
             loginBtn.innerHTML = '登录中... <span class="loading"></span>';
@@ -332,7 +167,7 @@
                         'Content-Type': 'application/json',
                     },
                     credentials: 'include',
-                    body: JSON.stringify(loginData),
+                    body: JSON.stringify({ username, password }),
                 });
                 
                 if (!response.ok) {

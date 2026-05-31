@@ -175,11 +175,10 @@ export class TestingModuleBuilder {
 
   private async createInstancesOfDependencies(
     graphInspector: GraphInspector,
-    options: { preview?: boolean; snapshot?: boolean },
+    options: { preview?: boolean },
   ) {
     const injector = new TestingInjector({
       preview: options?.preview ?? false,
-      snapshot: options?.snapshot ?? false,
     });
     const instanceLoader = new TestingInstanceLoader(
       this.container,

@@ -13,10 +13,8 @@ export interface MulterOptionsFactory {
 /**
  * @publicApi
  */
-export interface MulterModuleAsyncOptions extends Pick<
-  ModuleMetadata,
-  'imports'
-> {
+export interface MulterModuleAsyncOptions
+  extends Pick<ModuleMetadata, 'imports'> {
   useExisting?: Type<MulterOptionsFactory>;
   useClass?: Type<MulterOptionsFactory>;
   useFactory?: (

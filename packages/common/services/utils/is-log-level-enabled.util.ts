@@ -24,12 +24,9 @@ export function isLogLevelEnabled(
   if (logLevels.includes(targetLevel)) {
     return true;
   }
-
-  let highestLogLevelValue = -Infinity;
-  for (const level of logLevels) {
-    const v = LOG_LEVEL_VALUES[level];
-    if (v > highestLogLevelValue) highestLogLevelValue = v;
-  }
+  const highestLogLevelValue = logLevels
+    .map(level => LOG_LEVEL_VALUES[level])
+    .sort((a, b) => b - a)?.[0];
 
   const targetLevelValue = LOG_LEVEL_VALUES[targetLevel];
   return targetLevelValue >= highestLogLevelValue;

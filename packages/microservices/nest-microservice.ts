@@ -170,10 +170,6 @@ export class NestMicroservice
         'Cannot apply global exception filters: registration must occur before initialization.',
       );
     }
-
-    filters = this.applyInstanceDecoratorIfRegistered<ExceptionFilter>(
-      ...filters,
-    );
     this.applicationConfig.useGlobalFilters(...filters);
     filters.forEach(item =>
       this.graphInspector.insertOrphanedEnhancer({
@@ -195,10 +191,6 @@ export class NestMicroservice
         'Global pipes registered after initialization will not be applied.',
       );
     }
-
-    pipes = this.applyInstanceDecoratorIfRegistered<PipeTransform<any>>(
-      ...pipes,
-    );
     this.applicationConfig.useGlobalPipes(...pipes);
     pipes.forEach(item =>
       this.graphInspector.insertOrphanedEnhancer({
@@ -220,10 +212,6 @@ export class NestMicroservice
         'Cannot apply global interceptors: registration must occur before initialization.',
       );
     }
-
-    interceptors = this.applyInstanceDecoratorIfRegistered<NestInterceptor>(
-      ...interceptors,
-    );
     this.applicationConfig.useGlobalInterceptors(...interceptors);
     interceptors.forEach(item =>
       this.graphInspector.insertOrphanedEnhancer({
@@ -240,8 +228,6 @@ export class NestMicroservice
         'Cannot apply global guards: registration must occur before initialization.',
       );
     }
-
-    guards = this.applyInstanceDecoratorIfRegistered<CanActivate>(...guards);
     this.applicationConfig.useGlobalGuards(...guards);
     guards.forEach(item =>
       this.graphInspector.insertOrphanedEnhancer({
@@ -367,15 +353,5 @@ export class NestMicroservice
       this.get(token, { strict: false }),
     );
     return config.useFactory(...args);
-  }
-
-  private applyInstanceDecoratorIfRegistered<T>(...instances: T[]): T[] {
-    if (this.appOptions.instrument?.instanceDecorator) {
-      return instances.map(
-        instance =>
-          this.appOptions.instrument!.instanceDecorator(instance) as T,
-      );
-    }
-    return instances;
   }
 }

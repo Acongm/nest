@@ -2,7 +2,6 @@ import { ShutdownSignal } from '../enums/shutdown-signal.enum';
 import { LoggerService, LogLevel } from '../services/logger.service';
 import { DynamicModule } from './modules';
 import { NestApplicationContextOptions } from './nest-application-context-options.interface';
-import { ShutdownHooksOptions } from './shutdown-hooks-options.interface';
 import { Type } from './type.interface';
 
 export type SelectOptions = Pick<NestApplicationContextOptions, 'abortOnError'>;
@@ -144,15 +143,9 @@ export interface INestApplicationContext {
    * `onApplicationShutdown` function of a provider if the
    * process receives a shutdown signal.
    *
-   * @param {ShutdownSignal[] | string[]} [signals] The system signals to listen to
-   * @param {ShutdownHooksOptions} [options] Options for configuring shutdown hooks behavior
-   *
    * @returns {this} The Nest application context instance
    */
-  enableShutdownHooks(
-    signals?: ShutdownSignal[] | string[],
-    options?: ShutdownHooksOptions,
-  ): this;
+  enableShutdownHooks(signals?: ShutdownSignal[] | string[]): this;
 
   /**
    * Initializes the Nest application.

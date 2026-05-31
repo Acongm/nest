@@ -16,10 +16,11 @@ const DEFAULT_ARRAY_SEPARATOR = ',';
 /**
  * @publicApi
  */
-export interface ParseArrayOptions extends Omit<
-  ValidationPipeOptions,
-  'transform' | 'validateCustomDecorators' | 'exceptionFactory'
-> {
+export interface ParseArrayOptions
+  extends Omit<
+    ValidationPipeOptions,
+    'transform' | 'validateCustomDecorators' | 'exceptionFactory'
+  > {
   /**
    * Type for items to be converted into
    */

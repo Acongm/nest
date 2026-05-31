@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { ScheduledTask, ScheduledTaskDocument } from './schemas/scheduled-task.schema';
-import { TaskExecutionRecord, TaskExecutionRecordDocument } from '../task-execution-record/schemas/task-execution-record.schema';
+import { TaskExecutionRecord, TaskExecutionRecordDocument } from './schemas/task-execution-record.schema';
 import { ReportExportService } from '../report-export/report-export.service';
 import { ScheduledTaskEmailService } from './scheduled-task-email.service';
 import { ExportTaskStatus } from '../report-export/schemas/export-task.schema';
@@ -17,15 +17,6 @@ import { logger } from '../common/logger';
 @Injectable()
 export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
-  
-  // 从环境变量读取重试次数，默认3次
-  private readonly EXPORT_RETRY_COUNT = parseInt(
-    process.env.EXPORT_RETRY_COUNT || '3',
-    10,
-  );
-
-  // 从环境变量读取默认时区，默认为 Asia/Shanghai
-  private readonly DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Shanghai';
 
   constructor(
     @InjectModel(ScheduledTask.name)
@@ -36,7 +27,7 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
     @Inject(forwardRef(() => ReportExportService))
     private reportExportService: ReportExportService,
     private emailService: ScheduledTaskEmailService,
-  ) { }
+  ) {}
 
   /**
    * 模块初始化时加载所有启用的定时任务
@@ -87,9 +78,6 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       logger.info(`删除已存在的定时任务: ${jobName}`);
     }
 
-    // 获取任务的时区配置，使用环境变量中的默认时区
-    const timezone = task.timezone || this.DEFAULT_TIMEZONE;
-
     // 创建新的 Cron 任务
     const job = new CronJob(
       task.cronExpression,
@@ -104,11 +92,11 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       },
       null, // onComplete
       true, // start
-      timezone, // 使用任务指定的时区
+      'Asia/Shanghai', // timeZone
     );
 
-    // 注册任务（使用类型断言解决类型不匹配问题）
-    this.schedulerRegistry.addCronJob(jobName, job as any);
+    // 注册任务
+    this.schedulerRegistry.addCronJob(jobName, job);
 
     logger.info('定时任务已调度', {
       taskId: task.id,
@@ -148,63 +136,10 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   }
 
   /**
-   * 立即触发执行指定任务（用于测试）
-   * @param taskId 任务ID
-   * @param tenantId 租户ID
-   * @returns Promise<void>
-   */
-  async triggerTaskExecution(taskId: string, tenantId: string): Promise<void> {
-    logger.info('手动触发定时任务执行', { taskId, tenantId });
-
-    // 查找任务
-    const task = await this.taskModel.findOne({ id: taskId, tenantId }).exec();
-    if (!task) {
-      throw new Error(`任务不存在：${taskId} (租户: ${tenantId})`);
-    }
-
-    if (!task.enable) {
-      throw new Error(`任务未启用：${taskId}`);
-    }
-
-    // 手动触发时，使用历史最近的时间点
-    // 创建一个临时任务对象，用于计算历史最近的时间范围
-    const timezone = task.timezone || this.DEFAULT_TIMEZONE;
-    const { startTime, endTime } = this.calculateTimeRange(task, timezone, true);
-
-    logger.info('手动触发任务时间范围', {
-      taskId,
-      tenantId,
-      frequency: task.frequency,
-      timezone,
-      startTime: startTime.toISOString(),
-      endTime: endTime.toISOString(),
-    });
-
-    // 执行任务（异步执行，不阻塞）
-    // 需要传递计算好的时间范围，所以需要修改 executeTask 方法
-    this.executeTaskWithTimeRange(task, startTime, endTime).catch((error) => {
-      logger.error('手动触发任务执行失败', {
-        taskId,
-        tenantId,
-        error: error.message,
-        stack: error.stack,
-      });
-    });
-
-    logger.info('定时任务已触发执行', { taskId, tenantId });
-  }
-
-  /**
-   * 执行定时任务（使用计算好的时间范围）
+   * 执行定时任务
    * @param task 定时任务
-   * @param startTime 开始时间（可选，如果不提供则自动计算）
-   * @param endTime 结束时间（可选，如果不提供则自动计算）
    */
-  private async executeTaskWithTimeRange(
-    task: ScheduledTask,
-    startTime?: Date,
-    endTime?: Date,
-  ): Promise<void> {
+  private async executeTask(task: ScheduledTask): Promise<void> {
     const executionStartTime = new Date();
     let executionRecord: TaskExecutionRecordDocument | null = null;
 
@@ -213,1086 +148,217 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
       pageIds: task.pageIds,
       branchIds: task.branchIds,
       recipients: task.recipient,
-      pageIdsLength: task.pageIds?.length || 0,
-      branchIdsLength: task.branchIds?.length || 0,
     });
 
     try {
       // 创建执行记录
-      executionRecord = await this.createExecutionRecord(task, executionStartTime);
+      executionRecord = new this.executionRecordModel({
+        taskId: task.id,
+        tenantId: task.tenantId,
+        status: 'success',
+        startTime: executionStartTime,
+        emailStatus: 'not_sent',
+        recipients: task.recipient,
+        totalExports: 0,
+        successfulExports: 0,
+        emailAttachments: [],
+      });
+      await executionRecord.save();
 
-      // 计算时间范围（按照任务指定的时区）
-      // 如果未提供时间范围，则自动计算
-      let calculatedStartTime: Date;
-      let calculatedEndTime: Date;
-      
-      if (startTime && endTime) {
-        calculatedStartTime = startTime;
-        calculatedEndTime = endTime;
-      } else {
-        const timezone = task.timezone || this.DEFAULT_TIMEZONE;
-        const timeRange = this.calculateTimeRange(task, timezone, false);
-        calculatedStartTime = timeRange.startTime;
-        calculatedEndTime = timeRange.endTime;
+      // 计算时间范围（根据频率计算开始和结束时间）
+      const { startTime, endTime } = this.calculateTimeRange(task.frequency);
+
+      // 为每个 pageId 和 branchId 组合创建导出任务
+      const exportTasks = [];
+
+      for (const pageId of task.pageIds) {
+        for (const branchId of task.branchIds) {
+          // 构建报表页面URL
+          const reportPage = this.buildReportPageUrl(pageId, branchId);
+
+          // 创建导出任务（使用定时任务的 tenantId）
+          const exportTask = this.reportExportService.createExportTask(
+            {
+              startTime: startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              assetId: branchId, // 使用 branchId 作为 assetId
+              reportPage,
+              taskName: `定时任务-${task.id}`,
+            },
+            task.tenantId,
+          );
+
+          exportTasks.push({
+            exportTask,
+            pageId,
+            branchId,
+          });
+        }
       }
 
-      // 创建并等待导出任务完成（串行执行，避免内存压力）
-      const successfulExports = await this.createAndWaitForExportTasks(
-        task,
-        calculatedStartTime,
-        calculatedEndTime,
-        executionRecord,
+      // 更新总导出任务数
+      executionRecord.totalExports = exportTasks.length;
+      await executionRecord.save();
+
+      // 等待所有导出任务完成
+      const results = await Promise.allSettled(
+        exportTasks.map(({ exportTask }) => exportTask),
       );
+
+      // 收集成功的导出任务
+      const successfulExports = [];
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status === 'fulfilled') {
+          const exportTask = result.value;
+          const { pageId, branchId } = exportTasks[i];
+
+          // 等待任务完成（使用定时任务的 tenantId）
+          const completedTask = await this.waitForTaskCompletion(
+            exportTask._id.toString(),
+            task.tenantId,
+          );
+
+          if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
+            successfulExports.push({
+              task: completedTask,
+              pageId,
+              branchId,
+            });
+          }
+        } else {
+          logger.error('导出任务创建失败', {
+            taskId: task.id,
+            error: result.reason?.message,
+          });
+        }
+      }
 
       // 更新成功导出的任务数
       executionRecord.successfulExports = successfulExports.length;
       await executionRecord.save();
 
-      // 发送邮件
-      await this.sendReportEmails(task, successfulExports, executionRecord);
+      // 发送邮件（如果有成功的导出）
+      let emailResult: { success: boolean; error?: string; attachments: Array<{ filename: string; path: string }> } | null = null;
+      if (successfulExports.length > 0 && task.recipient.length > 0) {
+        try {
+          emailResult = await this.emailService.sendReportEmails(task, successfulExports);
+          if (emailResult.success) {
+            executionRecord.emailStatus = 'success';
+            executionRecord.emailAttachments = emailResult.attachments.map(att => ({
+              filename: att.filename,
+              path: att.path,
+            }));
+          } else {
+            executionRecord.emailStatus = 'failed';
+            executionRecord.emailErrorMessage = emailResult.error;
+          }
+        } catch (emailError) {
+          executionRecord.emailStatus = 'failed';
+          executionRecord.emailErrorMessage = emailError.message;
+          logger.error('发送邮件失败', {
+            taskId: task.id,
+            error: emailError.message,
+          });
+        }
+      } else if (task.recipient.length === 0) {
+        executionRecord.emailStatus = 'not_sent';
+      }
 
-      // 保存执行记录为成功
-      await this.saveExecutionRecordSuccess(executionRecord, executionStartTime, task);
+      // 更新执行记录为成功
+      const executionEndTime = new Date();
+      executionRecord.status = 'success';
+      executionRecord.endTime = executionEndTime;
+      executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
+      await executionRecord.save();
 
       logger.info('定时任务执行完成', {
         taskId: task.id,
-        tenantId: task.tenantId,
-        totalExports: executionRecord.totalExports,
+        totalExports: exportTasks.length,
         successfulExports: successfulExports.length,
-        emailStatus: executionRecord.emailStatus,
       });
     } catch (error) {
-      await this.handleExecutionError(task, executionRecord, executionStartTime, error);
+      logger.error('定时任务执行异常', {
+        taskId: task.id,
+        error: error.message,
+        stack: error.stack,
+      });
+
+      // 更新执行记录为失败
+      if (executionRecord) {
+        const executionEndTime = new Date();
+        executionRecord.status = 'failed';
+        executionRecord.endTime = executionEndTime;
+        executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
+        executionRecord.errorMessage = error.message;
+        executionRecord.errorStack = error.stack;
+        
+        // 发送失败通知邮件
+        if (task.recipient.length > 0) {
+          try {
+            await this.emailService.sendFailureNotification(task, error);
+            executionRecord.emailStatus = 'success';
+          } catch (emailError) {
+            executionRecord.emailStatus = 'failed';
+            executionRecord.emailErrorMessage = emailError.message;
+            logger.error('发送失败通知邮件异常', {
+              taskId: task.id,
+              error: emailError.message,
+            });
+          }
+        }
+        
+        await executionRecord.save();
+      }
+
       throw error;
     }
   }
 
   /**
-   * 执行定时任务（自动计算时间范围）
-   * @param task 定时任务
+   * 计算时间范围
+   * @param frequency 频率
    */
-  private async executeTask(task: ScheduledTask): Promise<void> {
-    return this.executeTaskWithTimeRange(task);
-  }
-
-  /**
-   * 创建执行记录
-   */
-  private async createExecutionRecord(
-    task: ScheduledTask,
-    startTime: Date,
-  ): Promise<TaskExecutionRecordDocument> {
-    const executionRecord = new this.executionRecordModel({
-      taskId: task.id,
-      tenantId: task.tenantId,
-      status: 'success',
-      startTime,
-      emailStatus: 'not_sent',
-      recipients: task.recipient,
-      totalExports: 0,
-      successfulExports: 0,
-      emailAttachments: [],
-    });
-
-    const savedRecord = await executionRecord.save();
-    logger.info('执行记录创建成功', {
-      taskId: task.id,
-      recordId: savedRecord._id?.toString(),
-      tenantId: task.tenantId,
-    });
-
-    return savedRecord;
-  }
-
-  /**
-   * 构建报表页面路径
-   */
-  private buildReportPagePath(pageId: string): string {
-    try {
-      const url = new URL(pageId);
-      return url.pathname + (url.search || '');
-    } catch {
-      if (pageId.startsWith('/')) {
-        return pageId;
-      }
-      return `/report/${pageId}`;
-    }
-  }
-
-  /**
-   * 为单个页面创建导出任务并等待完成（串行执行，避免并发内存过大）
-   */
-  private async createExportTasksForPage(
-    task: ScheduledTask,
-    pageId: string,
-    startTime: Date,
-    endTime: Date,
-    executionRecord: TaskExecutionRecordDocument,
-  ): Promise<Array<{ task: any; pageId: string; branchId?: string }>> {
-    const reportPage = this.buildReportPagePath(pageId);
-
-    logger.info('开始处理页面导出', {
-      taskId: task.id,
-      pageId,
-      branchIds: task.branchIds,
-      branchIdsCount: task.branchIds?.length || 0,
-      reportPage,
-    });
-
-    try {
-      // 获取任务的时区配置
-      const timezone = task.timezone || this.DEFAULT_TIMEZONE;
-
-      const exportTaskResult = await this.reportExportService.createExportTask(
-        {
-          startTime: startTime.toISOString(),
-          endTime: endTime.toISOString(),
-          branchIds: task.branchIds && task.branchIds.length > 0 ? task.branchIds : undefined,
-          reportPage,
-          taskName: `定时任务-${task.id}`,
-          timezone, // 传递时区信息
-        },
-        task.tenantId,
-      );
-
-      const createdTasks: any[] = Array.isArray(exportTaskResult) ? exportTaskResult : [exportTaskResult];
-
-      // 更新总导出任务数
-      executionRecord.totalExports += createdTasks.length;
-      await executionRecord.save();
-
-      logger.info('导出任务创建成功，开始等待完成', {
-        taskId: task.id,
-        pageId,
-        branchIds: task.branchIds,
-        branchIdsCount: task.branchIds?.length || 0,
-        reportPage,
-        tasksCount: createdTasks.length,
-        taskIds: createdTasks.map((t: any) => t._id.toString()),
-      });
-
-      const successfulExports: Array<{ task: any; pageId: string; branchId?: string }> = [];
-      let pageSuccessfulCount = 0;
-
-      // 串行等待每个导出任务完成，确保单个任务完成后再处理下一个
-      for (let i = 0; i < createdTasks.length; i++) {
-        const exportTask = createdTasks[i];
-        const exportTaskId = exportTask._id.toString();
-        const branchId = task.branchIds && task.branchIds.length > 0 ? task.branchIds[i] : undefined;
-
-        // 等待当前导出任务完成（带重试机制）
-        const result = await this.waitForSingleExportTask(task, exportTaskId, pageId, branchId, 0);
-        if (result) {
-          successfulExports.push(result);
-          pageSuccessfulCount++;
-          logger.info('页面导出任务成功完成', {
-            taskId: task.id,
-            pageId,
-            branchId,
-            exportTaskId,
-            currentIndex: i + 1,
-            totalTasks: createdTasks.length,
-          });
-        } else {
-          logger.warn('页面导出任务最终失败', {
-            taskId: task.id,
-            pageId,
-            branchId,
-            exportTaskId,
-            currentIndex: i + 1,
-            totalTasks: createdTasks.length,
-          });
-        }
-      }
-
-      logger.info('页面所有导出任务处理完成', {
-        taskId: task.id,
-        pageId,
-        pageExportsCount: createdTasks.length,
-        pageSuccessfulExports: pageSuccessfulCount,
-        pageFailedExports: createdTasks.length - pageSuccessfulCount,
-      });
-
-      return successfulExports;
-    } catch (createError: any) {
-      logger.error('创建导出任务失败', {
-        taskId: task.id,
-        pageId,
-        branchIds: task.branchIds,
-        reportPage,
-        error: createError.message,
-        stack: createError.stack,
-      });
-      return [];
-    }
-  }
-
-  /**
-   * 等待单个导出任务完成（带重试机制）
-   */
-  private async waitForSingleExportTask(
-    task: ScheduledTask,
-    exportTaskId: string,
-    pageId: string,
-    branchId?: string,
-    retryCount: number = 0,
-  ): Promise<{ task: any; pageId: string; branchId?: string } | null> {
-    logger.info('开始等待导出任务完成', {
-      taskId: task.id,
-      exportTaskId,
-      pageId,
-      branchId,
-      retryCount,
-      maxRetries: this.EXPORT_RETRY_COUNT,
-    });
-
-    try {
-      const completedTask = await this.waitForTaskCompletion(exportTaskId, task.tenantId);
-
-      logger.info('导出任务完成', {
-        taskId: task.id,
-        exportTaskId,
-        pageId,
-        branchId,
-        status: completedTask.status,
-        filePath: completedTask.filePath,
-        retryCount,
-      });
-
-      if (completedTask.status === ExportTaskStatus.COMPLETED && completedTask.filePath) {
-        return {
-          task: completedTask,
-          pageId,
-          branchId,
-        };
-      } else {
-        // 导出任务失败，检查是否需要重试
-        if (retryCount < this.EXPORT_RETRY_COUNT) {
-          logger.warn('导出任务失败，准备重试', {
-            taskId: task.id,
-            exportTaskId,
-            pageId,
-            branchId,
-            status: completedTask.status,
-            errorMessage: completedTask.errorMessage,
-            retryCount,
-            maxRetries: this.EXPORT_RETRY_COUNT,
-            nextRetry: retryCount + 1,
-          });
-
-          // 等待一段时间后重试（指数退避：1秒、2秒、4秒...）
-          const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-
-          // 重新创建导出任务并重试
-          try {
-            // 重试时使用相同的时间范围（手动触发模式，找到历史最近的时间点）
-            const timezone = task.timezone || this.DEFAULT_TIMEZONE;
-            const { startTime, endTime } = this.calculateTimeRange(task, timezone, true);
-            const reportPage = this.buildReportPagePath(pageId);
-            
-            // 重新创建导出任务
-            const retryExportTaskResult = await this.reportExportService.createExportTask(
-              {
-                startTime: startTime.toISOString(),
-                endTime: endTime.toISOString(),
-                branchIds: branchId ? [branchId] : undefined,
-                reportPage,
-                taskName: `定时任务-${task.id}-重试${retryCount + 1}`,
-              },
-              task.tenantId,
-            );
-
-            const retryTask = Array.isArray(retryExportTaskResult) 
-              ? retryExportTaskResult[0] 
-              : retryExportTaskResult;
-            const retryTaskId = retryTask._id.toString();
-
-            logger.info('重试导出任务已创建', {
-              taskId: task.id,
-              originalExportTaskId: exportTaskId,
-              retryExportTaskId: retryTaskId,
-              pageId,
-              branchId,
-              retryCount: retryCount + 1,
-            });
-
-            // 递归调用，增加重试次数
-            return await this.waitForSingleExportTask(
-              task,
-              retryTaskId,
-              pageId,
-              branchId,
-              retryCount + 1,
-            );
-          } catch (retryCreateError: any) {
-            logger.error('重试创建导出任务失败', {
-              taskId: task.id,
-              exportTaskId,
-              pageId,
-              branchId,
-              retryCount,
-              error: retryCreateError.message,
-              stack: retryCreateError.stack,
-            });
-            return null;
-          }
-        } else {
-          // 已达到最大重试次数
-          logger.error('导出任务失败，已达到最大重试次数', {
-            taskId: task.id,
-            exportTaskId,
-            pageId,
-            branchId,
-            status: completedTask.status,
-            errorMessage: completedTask.errorMessage,
-            retryCount,
-            maxRetries: this.EXPORT_RETRY_COUNT,
-          });
-          return null;
-        }
-      }
-    } catch (waitError: any) {
-      // 等待过程中出错，检查是否需要重试
-      if (retryCount < this.EXPORT_RETRY_COUNT) {
-        logger.warn('等待导出任务完成失败，准备重试', {
-          taskId: task.id,
-          exportTaskId,
-          pageId,
-          branchId,
-          error: waitError.message,
-          retryCount,
-          maxRetries: this.EXPORT_RETRY_COUNT,
-          nextRetry: retryCount + 1,
-        });
-
-        // 等待一段时间后重试（指数退避）
-        const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-        await new Promise((resolve) => setTimeout(resolve, retryDelay));
-
-        // 重新创建导出任务并重试
-        try {
-          // 重试时使用相同的时间范围（手动触发模式，找到历史最近的时间点）
-          const timezone = task.timezone || this.DEFAULT_TIMEZONE;
-          const { startTime, endTime } = this.calculateTimeRange(task, timezone, true);
-          const reportPage = this.buildReportPagePath(pageId);
-          
-          // 重新创建导出任务
-          const retryExportTaskResult = await this.reportExportService.createExportTask(
-            {
-              startTime: startTime.toISOString(),
-              endTime: endTime.toISOString(),
-              branchIds: branchId ? [branchId] : undefined,
-              reportPage,
-              taskName: `定时任务-${task.id}-重试${retryCount + 1}`,
-            },
-            task.tenantId,
-          );
-
-          const retryTask = Array.isArray(retryExportTaskResult) 
-            ? retryExportTaskResult[0] 
-            : retryExportTaskResult;
-          const retryTaskId = retryTask._id.toString();
-
-          logger.info('重试导出任务已创建（异常重试）', {
-            taskId: task.id,
-            originalExportTaskId: exportTaskId,
-            retryExportTaskId: retryTaskId,
-            pageId,
-            branchId,
-            retryCount: retryCount + 1,
-          });
-
-          // 递归调用，增加重试次数
-          return await this.waitForSingleExportTask(
-            task,
-            retryTaskId,
-            pageId,
-            branchId,
-            retryCount + 1,
-          );
-        } catch (retryCreateError: any) {
-          logger.error('重试创建导出任务失败（异常重试）', {
-            taskId: task.id,
-            exportTaskId,
-            pageId,
-            branchId,
-            retryCount,
-            error: retryCreateError.message,
-            stack: retryCreateError.stack,
-          });
-          return null;
-        }
-      } else {
-        // 已达到最大重试次数
-        logger.error('等待导出任务完成失败，已达到最大重试次数', {
-          taskId: task.id,
-          exportTaskId,
-          pageId,
-          branchId,
-          error: waitError.message,
-          stack: waitError.stack,
-          retryCount,
-          maxRetries: this.EXPORT_RETRY_COUNT,
-        });
-        return null;
-      }
-    }
-  }
-
-  /**
-   * 创建并等待所有导出任务完成（串行执行）
-   * 每个页面在 createExportTasksForPage 中已经完成导出，这里只需要串行调用并收集结果
-   */
-  private async createAndWaitForExportTasks(
-    task: ScheduledTask,
-    startTime: Date,
-    endTime: Date,
-    executionRecord: TaskExecutionRecordDocument,
-  ): Promise<Array<{ task: any; pageId: string; branchId?: string }>> {
-    if (!task.pageIds || task.pageIds.length === 0) {
-      logger.warn('定时任务没有配置 pageIds，跳过导出任务创建', {
-        taskId: task.id,
-        pageIds: task.pageIds,
-      });
-      return [];
-    }
-
-    logger.info('开始创建并执行导出任务', {
-      taskId: task.id,
-      pageIds: task.pageIds,
-      branchIds: task.branchIds,
-      pageIdsLength: task.pageIds.length,
-      branchIdsLength: task.branchIds?.length || 0,
-      tenantId: task.tenantId,
-      timeRange: {
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-      },
-    });
-
-    const successfulExports: Array<{ task: any; pageId: string; branchId?: string }> = [];
-
-    // 串行处理每个 pageId，确保单个页面导出文件后才执行下一个导出
-    // createExportTasksForPage 内部已经串行等待所有导出任务完成，避免并发内存过大
-    for (let i = 0; i < task.pageIds.length; i++) {
-      const pageId = task.pageIds[i];
-      
-      logger.info('开始处理页面导出', {
-        taskId: task.id,
-        pageId,
-        currentPageIndex: i + 1,
-        totalPages: task.pageIds.length,
-      });
-
-      // 为当前 pageId 创建导出任务并等待完成（内部串行执行）
-      // createExportTasksForPage 内部会更新 executionRecord.totalExports
-      const pageExports = await this.createExportTasksForPage(task, pageId, startTime, endTime, executionRecord);
-
-      // 收集成功的导出结果
-      successfulExports.push(...pageExports);
-
-      logger.info('页面导出处理完成', {
-        taskId: task.id,
-        pageId,
-        currentPageIndex: i + 1,
-        totalPages: task.pageIds.length,
-        pageSuccessfulExports: pageExports.length,
-        totalSuccessfulExports: successfulExports.length,
-      });
-    }
-
-    logger.info('所有导出任务处理完成', {
-      taskId: task.id,
-      totalTasks: executionRecord.totalExports,
-      successfulExports: successfulExports.length,
-    });
-
-    return successfulExports;
-  }
-
-  /**
-   * 发送报表邮件
-   */
-  private async sendReportEmails(
-    task: ScheduledTask,
-    successfulExports: Array<{ task: any; pageId: string; branchId?: string }>,
-    executionRecord: TaskExecutionRecordDocument,
-  ): Promise<void> {
-    if (successfulExports.length === 0) {
-      executionRecord.emailStatus = 'not_sent';
-      logger.info('没有成功的导出，邮件状态设为未发送', {
-        taskId: task.id,
-      });
-      return;
-    }
-
-    if (task.recipient.length === 0) {
-      executionRecord.emailStatus = 'not_sent';
-      logger.info('未配置收件人，邮件状态设为未发送', {
-        taskId: task.id,
-      });
-      return;
-    }
-
-    try {
-      const emailResult = await this.emailService.sendReportEmails(task, successfulExports);
-      if (emailResult.success) {
-        executionRecord.emailStatus = 'success';
-        executionRecord.emailAttachments = emailResult.attachments.map(att => ({
-          filename: att.filename,
-          path: att.path,
-        }));
-        logger.info('邮件发送成功，更新执行记录', {
-          taskId: task.id,
-          attachmentsCount: emailResult.attachments.length,
-        });
-      } else {
-        executionRecord.emailStatus = 'failed';
-        executionRecord.emailErrorMessage = emailResult.error;
-        logger.warn('邮件发送失败，更新执行记录', {
-          taskId: task.id,
-          error: emailResult.error,
-        });
-      }
-    } catch (emailError) {
-      executionRecord.emailStatus = 'failed';
-      executionRecord.emailErrorMessage = emailError.message;
-      logger.error('发送邮件异常', {
-        taskId: task.id,
-        error: emailError.message,
-        stack: emailError.stack,
-      });
-    }
-  }
-
-  /**
-   * 保存执行记录为成功状态
-   */
-  private async saveExecutionRecordSuccess(
-    executionRecord: TaskExecutionRecordDocument,
-    executionStartTime: Date,
-    task: ScheduledTask,
-  ): Promise<void> {
-    const executionEndTime = new Date();
-    executionRecord.status = 'success';
-    executionRecord.endTime = executionEndTime;
-    executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
-
-    try {
-      const savedRecord = await executionRecord.save();
-      logger.info('执行记录保存成功', {
-        taskId: task.id,
-        recordId: savedRecord._id?.toString(),
-        tenantId: savedRecord.tenantId,
-        status: savedRecord.status,
-        emailStatus: savedRecord.emailStatus,
-        totalExports: savedRecord.totalExports,
-        successfulExports: savedRecord.successfulExports,
-        duration: savedRecord.duration,
-      });
-    } catch (saveError) {
-      logger.error('执行记录保存失败', {
-        taskId: task.id,
-        error: saveError.message,
-        stack: saveError.stack,
-      });
-    }
-  }
-
-  /**
-   * 处理执行错误
-   */
-  private async handleExecutionError(
-    task: ScheduledTask,
-    executionRecord: TaskExecutionRecordDocument | null,
-    executionStartTime: Date,
-    error: any,
-  ): Promise<void> {
-    logger.error('定时任务执行异常', {
-      taskId: task.id,
-      error: error.message,
-      stack: error.stack,
-    });
-
-    if (!executionRecord) {
-      logger.warn('执行记录未创建，无法保存失败信息', {
-        taskId: task.id,
-      });
-      return;
-    }
-
-    const executionEndTime = new Date();
-    executionRecord.status = 'failed';
-    executionRecord.endTime = executionEndTime;
-    executionRecord.duration = executionEndTime.getTime() - executionStartTime.getTime();
-    executionRecord.errorMessage = error.message;
-    executionRecord.errorStack = error.stack;
-
-    // 发送失败通知邮件
-    if (task.recipient.length > 0) {
-      try {
-        await this.emailService.sendFailureNotification(task, error);
-        executionRecord.emailStatus = 'success';
-        logger.info('失败通知邮件发送成功', {
-          taskId: task.id,
-        });
-      } catch (emailError) {
-        executionRecord.emailStatus = 'failed';
-        executionRecord.emailErrorMessage = emailError.message;
-        logger.error('发送失败通知邮件异常', {
-          taskId: task.id,
-          error: emailError.message,
-        });
-      }
-    }
-
-    // 保存失败的执行记录
-    try {
-      const savedRecord = await executionRecord.save();
-      logger.info('失败执行记录保存成功', {
-        taskId: task.id,
-        recordId: savedRecord._id?.toString(),
-        tenantId: savedRecord.tenantId,
-        status: savedRecord.status,
-        errorMessage: savedRecord.errorMessage,
-      });
-    } catch (saveError) {
-      logger.error('失败执行记录保存失败', {
-        taskId: task.id,
-        error: saveError.message,
-        stack: saveError.stack,
-      });
-    }
-  }
-
-  /**
-   * 在指定时区获取当前日期时间的各个部分
-   * @param timezone 时区（IANA 时区标识符）
-   * @returns 包含年、月、日、时、分、秒的对象
-   */
-  private getCurrentDateTimePartsInTimezone(timezone: string): {
-    year: number;
-    month: number;
-    day: number;
-    hour: number;
-    minute: number;
-    second: number;
-  } {
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-
-    const parts = formatter.formatToParts(now);
-    return {
-      year: parseInt(parts.find(p => p.type === 'year')?.value || '0', 10),
-      month: parseInt(parts.find(p => p.type === 'month')?.value || '0', 10),
-      day: parseInt(parts.find(p => p.type === 'day')?.value || '0', 10),
-      hour: parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10),
-      minute: parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10),
-      second: parseInt(parts.find(p => p.type === 'second')?.value || '0', 10),
-    };
-  }
-
-  /**
-   * 在指定时区创建日期对象
-   * 将时区的日期时间转换为 UTC Date 对象
-   * @param year 年
-   * @param month 月（1-12）
-   * @param day 日
-   * @param hour 时
-   * @param minute 分
-   * @param second 秒
-   * @param timezone 时区（IANA 时区标识符）
-   * @returns Date 对象（UTC）
-   */
-  private createDateInTimezone(
-    year: number,
-    month: number,
-    day: number,
-    hour: number,
-    minute: number,
-    second: number,
-    timezone: string,
-  ): Date {
-    // 创建一个参考日期（该时区的日期时间）
-    // 使用一个技巧：创建一个 UTC 日期，然后通过时区偏移调整
-    const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-
-    // 获取该时区在该时间点的偏移
-    // 方法：比较 UTC 时间和时区时间在同一时刻的表示
-    const utcFormatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'UTC',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-
-    const tzFormatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-
-    // 获取 UTC 日期在该时区的表示
-    const tzParts = tzFormatter.formatToParts(utcDate);
-    const tzYear = parseInt(tzParts.find(p => p.type === 'year')?.value || '0', 10);
-    const tzMonth = parseInt(tzParts.find(p => p.type === 'month')?.value || '0', 10);
-    const tzDay = parseInt(tzParts.find(p => p.type === 'day')?.value || '0', 10);
-    const tzHour = parseInt(tzParts.find(p => p.type === 'hour')?.value || '0', 10);
-    const tzMinute = parseInt(tzParts.find(p => p.type === 'minute')?.value || '0', 10);
-    const tzSecond = parseInt(tzParts.find(p => p.type === 'second')?.value || '0', 10);
-
-    // 计算偏移：目标时区时间 - UTC 时间
-    const targetTzDate = new Date(Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMinute, tzSecond));
-    const offsetMs = targetTzDate.getTime() - utcDate.getTime();
-
-    // 调整：我们需要的是该时区时间对应的 UTC 时间
-    // 所以需要反向调整
-    const resultDate = new Date(utcDate.getTime() - offsetMs);
-
-    return resultDate;
-  }
-
-  /**
-   * 解析时间字符串（HH:mm）为小时和分钟
-   * @param timeStr 时间字符串，格式：HH:mm
-   * @returns { hour: number, minute: number }
-   */
-  private parseTimeString(timeStr: string): { hour: number; minute: number } {
-    const [hour, minute] = timeStr.split(':').map(Number);
-    if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-      throw new Error(`无效的时间格式: ${timeStr}，应为 HH:mm`);
-    }
-    return { hour, minute };
-  }
-
-  /**
-   * 获取星期几对应的数字（0=周日, 1=周一, ..., 6=周六）
-   * @param week 星期枚举值
-   * @returns 星期数字
-   */
-  private getWeekDayNumber(week: string): number {
-    const weekMap: Record<string, number> = {
-      'Sun': 0,
-      'Mon': 1,
-      'Tue': 2,
-      'Wed': 3,
-      'Thu': 4,
-      'Fri': 5,
-      'Sat': 6,
-    };
-    return weekMap[week] ?? 0;
-  }
-
-  /**
-   * 计算时间范围（按照指定时区和任务配置）
-   * @param task 定时任务
-   * @param timezone 时区（IANA 时区标识符，如 Asia/Shanghai）
-   * @param isManualTrigger 是否为手动触发（手动触发时查找历史最近的时间点）
-   */
-  private calculateTimeRange(
-    task: ScheduledTask,
-    timezone?: string,
-    isManualTrigger: boolean = false,
-  ): { startTime: Date; endTime: Date } {
-    // 使用传入的时区或默认时区
-    const tz = timezone || this.DEFAULT_TIMEZONE;
-    // 获取指定时区的当前日期时间部分
-    const now = this.getCurrentDateTimePartsInTimezone(tz);
-    
-    // 解析时间字符串
-    const { hour, minute } = this.parseTimeString(task.time.time);
-
-    let endTime: Date;
-    let startTime: Date;
-
-    switch (task.frequency) {
-      case 'daily': {
-        // 每日：time 作为结束时间，往前推24小时作为开始时间
-        if (isManualTrigger) {
-          // 手动触发：找到历史最近的结束时间点
-          // 如果当前时间已经过了今天的 time，则使用今天的 time 作为结束时间
-          // 否则使用昨天的 time 作为结束时间
-          const todayEndTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            now.day,
-            hour,
-            minute,
-            0,
-            tz,
-          );
-          
-          const currentTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            now.day,
-            now.hour,
-            now.minute,
-            now.second,
-            tz,
-          );
-
-          if (currentTime >= todayEndTime) {
-            // 使用今天的 time 作为结束时间
-            endTime = todayEndTime;
-          } else {
-            // 使用昨天的 time 作为结束时间
-            const yesterday = new Date(now.year, now.month - 1, now.day);
-            yesterday.setDate(yesterday.getDate() - 1);
-            endTime = this.createDateInTimezone(
-              yesterday.getFullYear(),
-              yesterday.getMonth() + 1,
-              yesterday.getDate(),
-              hour,
-              minute,
-              0,
-              tz,
-            );
-          }
-        } else {
-          // 定时执行：使用今天的 time 作为结束时间
-          endTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            now.day,
-            hour,
-            minute,
-            0,
-            tz,
-          );
-        }
-
-        // 往前推24小时作为开始时间
-        startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+  private calculateTimeRange(frequency: string): { startTime: Date; endTime: Date } {
+    const endTime = new Date();
+    endTime.setHours(23, 59, 59, 999); // 今天结束
+
+    let startTime = new Date();
+
+    switch (frequency) {
+      case 'daily':
+        // 昨天开始到今天结束
+        startTime.setDate(startTime.getDate() - 1);
+        startTime.setHours(0, 0, 0, 0);
         break;
-      }
-
-      case 'weekly': {
-        // 每周：week + time 作为结束时间，往前推7天作为开始时间
-        if (!task.time.week) {
-          throw new Error('weekly 频率必须配置 week 字段');
-        }
-
-        const targetWeekDay = this.getWeekDayNumber(task.time.week);
-        
-        if (isManualTrigger) {
-          // 手动触发：找到历史最近的指定星期几的 time
-          const currentDate = new Date(now.year, now.month - 1, now.day);
-          const currentWeekDay = currentDate.getDay(); // 0=周日, 1=周一, ..., 6=周六
-          
-          // 计算距离目标星期几的天数
-          let daysDiff = currentWeekDay - targetWeekDay;
-          if (daysDiff < 0) {
-            daysDiff += 7; // 如果目标星期几还没到，往前推一周
-          }
-          
-          // 如果当前时间已经过了今天的 time，且今天是目标星期几，则使用今天
-          // 否则往前找到最近的目标星期几
-          const todayEndTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            now.day,
-            hour,
-            minute,
-            0,
-            tz,
-          );
-          
-          const currentTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            now.day,
-            now.hour,
-            now.minute,
-            now.second,
-            tz,
-          );
-
-          let targetDate = new Date(currentDate);
-          if (currentWeekDay === targetWeekDay && currentTime >= todayEndTime) {
-            // 今天就是目标星期几，且已经过了 time，使用今天
-            targetDate = currentDate;
-          } else {
-            // 往前找到最近的目标星期几
-            if (daysDiff === 0 && currentTime < todayEndTime) {
-              // 今天就是目标星期几，但还没到 time，往前推一周
-              daysDiff = 7;
-            }
-            targetDate.setDate(targetDate.getDate() - daysDiff);
-          }
-
-          endTime = this.createDateInTimezone(
-            targetDate.getFullYear(),
-            targetDate.getMonth() + 1,
-            targetDate.getDate(),
-            hour,
-            minute,
-            0,
-            tz,
-          );
-        } else {
-          // 定时执行：使用本周的指定星期几的 time 作为结束时间
-          const currentDate = new Date(now.year, now.month - 1, now.day);
-          const currentWeekDay = currentDate.getDay();
-          let daysDiff = currentWeekDay - targetWeekDay;
-          if (daysDiff < 0) {
-            daysDiff += 7;
-          }
-          const targetDate = new Date(currentDate);
-          targetDate.setDate(targetDate.getDate() - daysDiff);
-
-          endTime = this.createDateInTimezone(
-            targetDate.getFullYear(),
-            targetDate.getMonth() + 1,
-            targetDate.getDate(),
-            hour,
-            minute,
-            0,
-            tz,
-          );
-        }
-
-        // 往前推7天作为开始时间
-        startTime = new Date(endTime.getTime() - 7 * 24 * 60 * 60 * 1000);
+      case 'weekly':
+        // 一周前开始到今天结束
+        startTime.setDate(startTime.getDate() - 7);
+        startTime.setHours(0, 0, 0, 0);
         break;
-      }
-
-      case 'monthly': {
-        // 每月：day + time 作为结束时间，往前推30天作为开始时间
-        if (!task.time.day) {
-          throw new Error('monthly 频率必须配置 day 字段');
-        }
-
-        if (isManualTrigger) {
-          // 手动触发：找到历史最近的指定日期的 time
-          const currentDate = new Date(now.year, now.month - 1, now.day);
-          const targetDay = task.time.day;
-
-          // 如果当前日期已经过了本月的目标日期，或当前日期就是目标日期但已过 time
-          const todayEndTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            now.day,
-            hour,
-            minute,
-            0,
-            tz,
-          );
-          
-          const currentTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            now.day,
-            now.hour,
-            now.minute,
-            now.second,
-            tz,
-          );
-
-          let targetDate: Date;
-          if (now.day >= targetDay && (now.day > targetDay || currentTime >= todayEndTime)) {
-            // 使用本月的目标日期
-            targetDate = new Date(now.year, now.month - 1, targetDay);
-          } else {
-            // 使用上月的目标日期
-            const lastMonth = new Date(now.year, now.month - 1, 1);
-            lastMonth.setMonth(lastMonth.getMonth() - 1);
-            // 处理月份天数不足的情况（如2月只有28/29天）
-            const lastMonthDays = new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0).getDate();
-            const day = Math.min(targetDay, lastMonthDays);
-            targetDate = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), day);
-          }
-
-          endTime = this.createDateInTimezone(
-            targetDate.getFullYear(),
-            targetDate.getMonth() + 1,
-            targetDate.getDate(),
-            hour,
-            minute,
-            0,
-            tz,
-          );
-        } else {
-          // 定时执行：使用本月的指定日期的 time 作为结束时间
-          const currentDate = new Date(now.year, now.month - 1, 1);
-          // 处理月份天数不足的情况
-          const daysInMonth = new Date(now.year, now.month, 0).getDate();
-          const day = Math.min(task.time.day, daysInMonth);
-          
-          endTime = this.createDateInTimezone(
-            now.year,
-            now.month,
-            day,
-            hour,
-            minute,
-            0,
-            tz,
-          );
-        }
-
-        // 往前推30天作为开始时间
-        startTime = new Date(endTime.getTime() - 30 * 24 * 60 * 60 * 1000);
+      case 'monthly':
+        // 一个月前开始到今天结束
+        startTime.setMonth(startTime.getMonth() - 1);
+        startTime.setHours(0, 0, 0, 0);
         break;
-      }
-
       default:
-        throw new Error(`不支持的频率: ${task.frequency}`);
+        // 默认：昨天开始到今天结束
+        startTime.setDate(startTime.getDate() - 1);
+        startTime.setHours(0, 0, 0, 0);
     }
-
-    logger.info('计算时间范围', {
-      frequency: task.frequency,
-      timezone: tz,
-      isManualTrigger,
-      time: task.time.time,
-      week: task.time.week,
-      day: task.time.day,
-      startTime: startTime.toISOString(),
-      endTime: endTime.toISOString(),
-    });
 
     return { startTime, endTime };
   }
 
   /**
    * 构建报表页面URL
-   * @param pageId 页面ID或页面路径
+   * @param pageId 页面ID
    * @param branchId 分支ID
    */
   private buildReportPageUrl(pageId: string, branchId: string): string {
-    // 如果 pageId 已经是完整 URL，直接使用并添加 branchId 参数
-    try {
-      const url = new URL(pageId);
-      url.searchParams.set('branchId', branchId);
-      return url.toString();
-    } catch {
-      // 如果 pageId 不是完整 URL，构建相对路径
-      // 如果 pageId 已经是路径格式（以 / 开头），直接使用
-      if (pageId.startsWith('/')) {
-        const separator = pageId.includes('?') ? '&' : '?';
-        return `${pageId}${separator}branchId=${branchId}`;
-      }
-      // 否则，假设是页面ID，构建路径格式：/report/{pageId}?branchId={branchId}
+    // 根据实际业务需求构建URL
+    // 这里假设报表页面路径格式为 /report/{pageId}?branchId={branchId}
     return `/report/${pageId}?branchId=${branchId}`;
-    }
   }
 
   /**
@@ -1308,85 +374,27 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
   ): Promise<any> {
     const startTime = Date.now();
     const pollInterval = 2000; // 每2秒轮询一次
-    let lastStatus: string | null = null;
-    let pollCount = 0;
-
-    logger.info('开始轮询任务状态', {
-      taskId,
-      tenantId,
-      maxWaitTime: `${maxWaitTime / 1000}秒`,
-    });
 
     while (Date.now() - startTime < maxWaitTime) {
       try {
         const task = await this.reportExportService.findOne(taskId, tenantId);
-        
-        if (!task) {
-          throw new Error(`任务不存在：${taskId}`);
-        }
-
-        // 如果状态发生变化，记录日志
-        if (task.status !== lastStatus) {
-          logger.info('任务状态更新', {
-            taskId,
-            oldStatus: lastStatus,
-            newStatus: task.status,
-            pollCount,
-          });
-          lastStatus = task.status;
-        }
 
         if (task.status === ExportTaskStatus.COMPLETED || task.status === ExportTaskStatus.FAILED) {
-          logger.info('任务完成（成功或失败）', {
-            taskId,
-            status: task.status,
-            filePath: task.filePath,
-            errorMessage: task.errorMessage,
-            pollCount,
-            elapsedTime: `${(Date.now() - startTime) / 1000}秒`,
-          });
           return task;
-        }
-
-        pollCount++;
-        // 每10次轮询记录一次日志（避免日志过多）
-        if (pollCount % 10 === 0) {
-          logger.debug('继续轮询任务状态', {
-            taskId,
-            status: task.status,
-            pollCount,
-            elapsedTime: `${(Date.now() - startTime) / 1000}秒`,
-          });
         }
 
         // 等待后继续轮询
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      } catch (error: any) {
+      } catch (error) {
         logger.error('轮询任务状态失败', {
           taskId,
-          tenantId,
           error: error.message,
-          stack: error.stack,
-          pollCount,
         });
         throw error;
       }
     }
 
-    // 超时前最后一次查询，获取最新状态
-    try {
-      const finalTask = await this.reportExportService.findOne(taskId, tenantId);
-      logger.warn('任务等待超时', {
-        taskId,
-        finalStatus: finalTask?.status,
-        maxWaitTime: `${maxWaitTime / 1000}秒`,
-        pollCount,
-      });
-    } catch (e) {
-      // 忽略最后的查询错误
-    }
-
-    throw new Error(`任务超时：${taskId}（等待时间：${maxWaitTime / 1000}秒）`);
+    throw new Error(`任务超时：${taskId}`);
   }
 
 
@@ -1414,8 +422,8 @@ export class ScheduledTaskSchedulerService implements OnModuleInit, OnModuleDest
     let nextExecution: Date | undefined;
     if (isRunning) {
       const job = this.schedulerRegistry.getCronJob(jobName);
-      if (job && job.nextDate) {
-        nextExecution = job.nextDate().toJSDate();
+      if (job && job.nextDates) {
+        nextExecution = job.nextDates().toDate();
       }
     }
 

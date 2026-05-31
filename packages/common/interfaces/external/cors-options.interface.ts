@@ -10,7 +10,7 @@ type StaticOrigin = boolean | string | RegExp | (string | RegExp)[];
  * @publicApi
  */
 export type CustomOrigin = (
-  requestOrigin: string | undefined,
+  requestOrigin: string,
   callback: (err: Error | null, origin?: StaticOrigin) => void,
 ) => void;
 

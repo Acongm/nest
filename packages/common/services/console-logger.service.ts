@@ -522,10 +522,10 @@ export class ConsoleLogger implements LoggerService {
       breakLength,
     };
 
-    if (typeof this.options.maxArrayLength !== 'undefined') {
+    if (this.options.maxArrayLength) {
       inspectOptions.maxArrayLength = this.options.maxArrayLength;
     }
-    if (typeof this.options.maxStringLength !== 'undefined') {
+    if (this.options.maxStringLength) {
       inspectOptions.maxStringLength = this.options.maxStringLength;
     }
 
@@ -551,7 +551,7 @@ export class ConsoleLogger implements LoggerService {
     return value;
   }
 
-  protected getContextAndMessagesToPrint(args: unknown[]) {
+  private getContextAndMessagesToPrint(args: unknown[]) {
     if (args?.length <= 1) {
       return { messages: args, context: this.context };
     }
@@ -566,7 +566,7 @@ export class ConsoleLogger implements LoggerService {
     };
   }
 
-  protected getContextAndStackAndMessagesToPrint(args: unknown[]) {
+  private getContextAndStackAndMessagesToPrint(args: unknown[]) {
     if (args.length === 2) {
       return this.isStackFormat(args[1])
         ? {
@@ -574,7 +574,10 @@ export class ConsoleLogger implements LoggerService {
             stack: args[1] as string,
             context: this.context,
           }
-        : { ...this.getContextAndMessagesToPrint(args) };
+        : {
+            messages: [args[0]],
+            context: args[1] as string,
+          };
     }
 
     const { messages, context } = this.getContextAndMessagesToPrint(args);
@@ -594,7 +597,7 @@ export class ConsoleLogger implements LoggerService {
     };
   }
 
-  protected isStackFormat(stack: unknown) {
+  private isStackFormat(stack: unknown) {
     if (!isString(stack) && !isUndefined(stack)) {
       return false;
     }
@@ -602,7 +605,7 @@ export class ConsoleLogger implements LoggerService {
     return /^(.)+\n\s+at .+:\d+:\d+/.test(stack!);
   }
 
-  protected getColorByLogLevel(level: LogLevel) {
+  private getColorByLogLevel(level: LogLevel) {
     switch (level) {
       case 'debug':
         return clc.magentaBright;

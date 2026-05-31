@@ -34,7 +34,6 @@ yarn-error.log
 /packages/**/.npmignore
 /packages/**/LICENSE
 *.tsbuildinfo
-/.nx/workspace-data
 
 # example
 /quick-start
@@ -51,6 +50,5 @@ yarn-error.log
 build/config\.gypi
 
 .npmrc
-!sample/06-mongoose/.npmrc
 pnpm-lock.yaml
 /.history

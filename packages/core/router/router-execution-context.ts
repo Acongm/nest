@@ -90,7 +90,6 @@ export class RouterExecutionContext {
     const {
       argsLength,
       fnHandleResponse,
-      isSseHandler,
       paramtypes,
       getParamsMetadata,
       httpStatusCode,
@@ -163,7 +162,7 @@ export class RouterExecutionContext {
       hasCustomHeaders &&
         this.responseController.setHeaders(res, responseHeaders);
 
-      const resultOrDeferred = this.interceptorsConsumer.intercept(
+      const result = await this.interceptorsConsumer.intercept(
         interceptors,
         [req, res, next],
         instance,
@@ -171,7 +170,6 @@ export class RouterExecutionContext {
         handler(args, req, res, next),
         contextType,
       );
-      const result = isSseHandler ? resultOrDeferred : await resultOrDeferred;
       await (fnHandleResponse as HandlerResponseBasicFn)(result, res, req);
     };
   }
@@ -233,7 +231,6 @@ export class RouterExecutionContext {
       isResponseHandled,
       httpRedirectResponse,
     );
-    const isSseHandler = !!this.reflectSse(callback);
 
     const httpCode = this.reflectHttpStatusCode(callback);
     const httpStatusCode = httpCode
@@ -245,7 +242,6 @@ export class RouterExecutionContext {
     const handlerMetadata: HandlerMetadata = {
       argsLength,
       fnHandleResponse,
-      isSseHandler,
       paramtypes,
       getParamsMetadata,
       httpStatusCode,
@@ -438,7 +434,7 @@ export class RouterExecutionContext {
     }
     const isSseHandler = !!this.reflectSse(callback);
     if (isSseHandler) {
-      return async <
+      return <
         TResult extends Observable<unknown> = any,
         TResponse extends HeaderStream = any,
         TRequest extends IncomingMessage = any,
@@ -447,17 +443,11 @@ export class RouterExecutionContext {
         res: TResponse,
         req: TRequest,
       ) => {
-        const rawResponse = (res as { raw?: TResponse }).raw ?? res;
-        await this.responseController.sse(
+        this.responseController.sse(
           result,
-          rawResponse,
+          (res as any).raw || res,
           (req as any).raw || req,
-          {
-            additionalHeaders: res.getHeaders?.(),
-            statusCode:
-              (res as { statusCode?: number }).statusCode ??
-              (rawResponse as { statusCode?: number }).statusCode,
-          },
+          { additionalHeaders: res.getHeaders?.() as any },
         );
       };
     }

@@ -1,48 +1,9 @@
-import { pathToFileURL } from 'url';
-import { Logger } from '../../services/logger.service';
-import { FileValidatorContext } from './file-validator-context.interface';
 import { FileValidator } from './file-validator.interface';
 import { IFile } from './interfaces';
 import { loadEsm } from 'load-esm';
 
-const logger = new Logger('FileTypeValidator');
-type FileTypeValidatorContext = FileValidatorContext<
-  Omit<FileTypeValidatorOptions, 'errorMessage'>
->;
-
 export type FileTypeValidatorOptions = {
-  /**
-   * Expected file type(s) for validation. Can be a string (MIME type)
-   * or a regular expression to match multiple types.
-   *
-   * @example
-   * // Match a single MIME type
-   * fileType: 'image/png'
-   *
-   * @example
-   * // Match multiple types using RegExp
-   * fileType: /^image\/(png|jpeg)$/
-   */
   fileType: string | RegExp;
-
-  /**
-   * Custom error message displayed when file type validation fails
-   * Can be provided as a static string, or as a factory function
-   * that receives the validation context (file and validator configuration)
-   * and returns a dynamic error message.
-   *
-   * @example
-   * // Static message
-   * new FileTypeValidator({ fileType: 'image/png', errorMessage: 'Only PNG allowed' })
-   *
-   * @example
-   * // Dynamic message based on file object and validator configuration
-   * new FileTypeValidator({
-   *   fileType: 'image/png',
-   *   errorMessage: ctx => `Received file type '${ctx.file?.mimetype}', but expected '${ctx.config.fileType}'`
-   * })
-   */
-  errorMessage?: string | ((ctx: FileTypeValidatorContext) => string);
 
   /**
    * If `true`, the validator will skip the magic numbers validation.
@@ -72,31 +33,10 @@ export class FileTypeValidator extends FileValidator<
   IFile
 > {
   buildErrorMessage(file?: IFile): string {
-    const { errorMessage, ...config } = this.validationOptions;
-
-    if (errorMessage) {
-      return typeof errorMessage === 'function'
-        ? errorMessage({ file, config })
-        : errorMessage;
-    }
-
-    /**
-     * If the file buffer is not available, and fallbackToMimetype is not enabled,
-     * we cannot perform magic number validation,
-     * so we return a specific error message indicating
-     * that validation could not be performed due to missing buffer.
-     */
-    if (
-      file?.mimetype &&
-      !file.buffer &&
-      !this.validationOptions?.fallbackToMimetype &&
-      !this.validationOptions?.skipMagicNumbersValidation
-    ) {
-      return `Validation failed (file buffer is not available; file type validation could not be performed; expected type is ${this.validationOptions.fileType})`;
-    }
+    const expected = this.validationOptions.fileType;
 
     if (file?.mimetype) {
-      const baseMessage = `Validation failed (current file type is ${file.mimetype}, expected type is ${this.validationOptions.fileType})`;
+      const baseMessage = `Validation failed (current file type is ${file.mimetype}, expected type is ${expected})`;
 
       /**
        * If fallbackToMimetype is enabled, this means the validator failed to detect the file type
@@ -112,7 +52,7 @@ export class FileTypeValidator extends FileValidator<
       return baseMessage;
     }
 
-    return `Validation failed (expected type is ${this.validationOptions.fileType})`;
+    return `Validation failed (expected type is ${expected})`;
   }
 
   async isValid(file?: IFile): Promise<boolean> {
@@ -129,25 +69,11 @@ export class FileTypeValidator extends FileValidator<
       );
     }
 
-    if (!isFileValid) return false;
-
-    if (!file.buffer) {
-      if (this.validationOptions.fallbackToMimetype) {
-        return !!file.mimetype.match(this.validationOptions.fileType);
-      }
-      return false;
-    }
+    if (!isFileValid || !file.buffer) return false;
 
     try {
-      let fileTypeModule: string;
-      try {
-        const resolvedPath = require.resolve('file-type');
-        fileTypeModule = pathToFileURL(resolvedPath).href;
-      } catch {
-        fileTypeModule = 'file-type';
-      }
       const { fileTypeFromBuffer } =
-        await loadEsm<typeof import('file-type')>(fileTypeModule);
+        await loadEsm<typeof import('file-type')>('file-type');
       const fileType = await fileTypeFromBuffer(file.buffer);
 
       if (fileType) {
@@ -164,27 +90,7 @@ export class FileTypeValidator extends FileValidator<
         return !!file.mimetype.match(this.validationOptions.fileType);
       }
       return false;
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-
-      // Check for common ESM loading issues
-      if (
-        errorMessage.includes('ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING') ||
-        errorMessage.includes('Cannot find module') ||
-        errorMessage.includes('ERR_MODULE_NOT_FOUND')
-      ) {
-        logger.warn(
-          `Failed to load the "file-type" package for magic number validation. ` +
-            `If you are using Jest, run it with NODE_OPTIONS="--experimental-vm-modules". ` +
-            `Error: ${errorMessage}`,
-        );
-      }
-
-      // Fallback to mimetype if enabled
-      if (this.validationOptions.fallbackToMimetype) {
-        return !!file.mimetype.match(this.validationOptions.fileType);
-      }
+    } catch {
       return false;
     }
   }

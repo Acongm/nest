@@ -16,10 +16,6 @@ import { ClientProxy } from './client-proxy';
 // type Redis = import('ioredis').Redis;
 type Redis = any;
 
-type RedisOutputOptions = {
-  returnBuffers?: boolean;
-};
-
 let redisPackage = {} as any;
 
 /**
@@ -38,10 +34,7 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
     callback: RedisEvents[keyof RedisEvents];
   }> = [];
 
-  constructor(
-    protected readonly options: Required<RedisOptions>['options'] &
-      RedisOutputOptions,
-  ) {
+  constructor(protected readonly options: Required<RedisOptions>['options']) {
     super();
 
     redisPackage = loadPackage('ioredis', ClientRedis.name, () =>
@@ -62,7 +55,6 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
 
   public async close() {
     this.isManuallyClosed = true;
-    this.handleClose();
     this.pubClient && (await this.pubClient.quit());
     this.subClient && (await this.subClient.quit());
     this.pubClient = this.subClient = null;
@@ -97,12 +89,10 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
   }
 
   public createClient(): Redis {
-    const clientInfoTag = this.getOptionsProp(this.options, 'clientInfoTag');
     return new redisPackage({
       host: REDIS_DEFAULT_HOST,
       port: REDIS_DEFAULT_PORT,
       ...this.getClientOptions(),
-      ...(clientInfoTag && { clientInfoTag }),
       lazyConnect: true,
     });
   }
@@ -147,10 +137,7 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
 
       if (!this.wasInitialConnectionSuccessful) {
         this.wasInitialConnectionSuccessful = true;
-        this.subClient.on(
-          this.options.returnBuffers ? 'messageBuffer' : 'message',
-          this.createResponseCallback(),
-        );
+        this.subClient.on('message', this.createResponseCallback());
       }
     });
   }
@@ -163,7 +150,6 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
         return;
       }
       this._status$.next(RedisStatus.DISCONNECTED);
-      this.handleClose();
 
       if (this.getOptionsProp(this.options, 'retryAttempts') === undefined) {
         // When retryAttempts is not specified, the connection will not be re-established
@@ -181,17 +167,6 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
         this.connectionPromise.catch(() => {});
       }
     });
-  }
-
-  public handleClose() {
-    if (this.routingMap.size > 0) {
-      const err = new Error('Connection closed');
-      for (const callback of this.routingMap.values()) {
-        callback({ err });
-      }
-      this.routingMap.clear();
-    }
-    this.subscriptionsCount.clear();
   }
 
   public getClientOptions(): Partial<RedisOptions['options']> {
@@ -246,27 +221,12 @@ export class ClientRedis extends ClientProxy<RedisEvents, RedisStatus> {
     buffer: string,
   ) => Promise<void> {
     return async (channel: string, buffer: string) => {
-      let packet: any;
-      try {
-        packet = JSON.parse(buffer);
-      } catch (err) {
-        this.logger.debug(
-          'Redis response packet is not in json format, bypassing...',
-        );
-        packet = buffer;
-      }
+      const packet = JSON.parse(buffer);
       const { err, response, isDisposed, id } =
         await this.deserializer.deserialize(packet);
 
       const callback = this.routingMap.get(id);
       if (!callback) {
-        if (Buffer.isBuffer(buffer))
-          this.logger.debug(
-            'You have to parse your buffer on your own to get id from it, because it is not in json format',
-          );
-        this.logger.debug(
-          'No matching callback found for Redis response packet with id: ' + id,
-        );
         return;
       }
       if (isDisposed || err) {

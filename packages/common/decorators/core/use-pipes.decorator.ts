@@ -38,7 +38,6 @@ export function UsePipes(
       pipe && (isFunction(pipe) || isFunction(pipe.transform));
 
     if (descriptor) {
-      validateEach(target.constructor, pipes, isPipeValid, '@UsePipes', 'pipe');
       extendArrayMetadata(PIPES_METADATA, pipes, descriptor.value);
       return descriptor;
     }

@@ -41,10 +41,9 @@ export interface ParseBoolPipeOptions {
  * @publicApi
  */
 @Injectable()
-export class ParseBoolPipe implements PipeTransform<
-  string | boolean,
-  Promise<boolean>
-> {
+export class ParseBoolPipe
+  implements PipeTransform<string | boolean, Promise<boolean>>
+{
   protected exceptionFactory: (error: string) => any;
 
   constructor(@Optional() protected readonly options?: ParseBoolPipeOptions) {

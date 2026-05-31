@@ -150,12 +150,7 @@ export class DependenciesScanner {
         throw new UndefinedModuleException(moduleDefinition, index, scope);
       }
       if (!innerModule) {
-        throw new InvalidModuleException(
-          moduleDefinition,
-          index,
-          scope,
-          innerModule,
-        );
+        throw new InvalidModuleException(moduleDefinition, index, scope);
       }
       if (ctxRegistry.includes(innerModule)) {
         continue;
@@ -193,22 +188,12 @@ export class DependenciesScanner {
       ? moduleDefinition.forwardRef()
       : moduleDefinition;
 
-    if (this.isInjectable(moduleToAdd)) {
-      throw new InvalidClassModuleException(
-        moduleDefinition,
-        scope,
-        'provider',
-      );
-    }
-    if (this.isController(moduleToAdd)) {
-      throw new InvalidClassModuleException(
-        moduleDefinition,
-        scope,
-        'controller',
-      );
-    }
-    if (this.isExceptionFilter(moduleToAdd)) {
-      throw new InvalidClassModuleException(moduleDefinition, scope, 'filter');
+    if (
+      this.isInjectable(moduleToAdd) ||
+      this.isController(moduleToAdd) ||
+      this.isExceptionFilter(moduleToAdd)
+    ) {
+      throw new InvalidClassModuleException(moduleDefinition, scope);
     }
 
     return this.container.addModule(moduleToAdd, scope);

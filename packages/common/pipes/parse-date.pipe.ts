@@ -31,9 +31,9 @@ export interface ParseDatePipeOptions {
 }
 
 @Injectable()
-export class ParseDatePipe implements PipeTransform<
-  string | number | undefined | null
-> {
+export class ParseDatePipe
+  implements PipeTransform<string | number | undefined | null>
+{
   protected exceptionFactory: (error: string) => any;
 
   constructor(private readonly options: ParseDatePipeOptions = {}) {
@@ -59,7 +59,7 @@ export class ParseDatePipe implements PipeTransform<
       return this.options.default ? this.options.default() : value;
     }
 
-    if (isNil(value) || value === '') {
+    if (!value) {
       throw this.exceptionFactory('Validation failed (no Date provided)');
     }
 

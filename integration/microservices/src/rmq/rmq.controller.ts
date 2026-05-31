@@ -25,7 +25,7 @@ export class RMQController {
       options: {
         urls: [`amqp://localhost:5672`],
         queue: 'test',
-        queueOptions: { durable: true },
+        queueOptions: { durable: false },
         socketOptions: { noDelay: true },
       },
     });
@@ -69,7 +69,7 @@ export class RMQController {
       options: {
         urls: [`amqp://localhost:5671`, `amqp://localhost:5672`],
         queue: 'test',
-        queueOptions: { durable: true },
+        queueOptions: { durable: false },
         socketOptions: { noDelay: true },
       },
     });

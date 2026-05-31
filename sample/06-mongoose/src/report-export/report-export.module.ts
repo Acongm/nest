@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReportExportController } from './report-export.controller';
 import { ReportExportService } from './report-export.service';
-import { ReportExportOfficeService } from './report-export-office.service';
 import { ExportTask, ExportTaskSchema } from './schemas/export-task.schema';
 
 @Module({
@@ -12,8 +11,8 @@ import { ExportTask, ExportTaskSchema } from './schemas/export-task.schema';
     ]),
   ],
   controllers: [ReportExportController],
-  providers: [ReportExportService, ReportExportOfficeService],
-  exports: [ReportExportService, ReportExportOfficeService],
+  providers: [ReportExportService],
+  exports: [ReportExportService],
 })
 export class ReportExportModule {}
 

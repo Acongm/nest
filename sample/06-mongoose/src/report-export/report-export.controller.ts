@@ -105,26 +105,16 @@ export class ReportExportController {
         throw new Error('用户未认证');
       }
       const tenantId = reqRequest.user.tenantId;
-      const fileData = await this.reportExportService.getTaskFile(id, tenantId);
+      const filePath = await this.reportExportService.getTaskFilePath(id, tenantId);
       
-      let file: Buffer;
-      
-      // 优先使用 GridFS 存储的文件
-      if (fileData.buffer) {
-        file = fileData.buffer;
-      } else if (fileData.filePath) {
-        // 兼容旧数据：从文件系统读取
-        if (!existsSync(fileData.filePath)) {
-          return res.status(HttpStatus.NOT_FOUND).json({
-            message: '文件不存在',
-          });
-        }
-        file = readFileSync(fileData.filePath);
-      } else {
+      if (!existsSync(filePath)) {
         return res.status(HttpStatus.NOT_FOUND).json({
           message: '文件不存在',
         });
       }
+
+      // 读取文件
+      const file = readFileSync(filePath);
       
       // 设置响应头
       res.setHeader('Content-Type', 'application/pdf');
