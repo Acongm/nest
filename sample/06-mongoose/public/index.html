@@ -367,17 +367,29 @@
                     throw new Error(error.message || '创建任务失败');
                 }
                 
+                const contentType = response.headers.get('content-type') || '';
+                if (contentType.includes('application/pdf')) {
+                    const blob = await response.blob();
+                    downloadBlob(blob, `report_${Date.now()}.pdf`);
+                    statusMessage.innerHTML = `
+                        <div class="success">
+                            ✅ PDF 导出成功，已开始下载
+                        </div>
+                    `;
+                    return;
+                }
+
                 const task = await response.json();
-                
+
                 statusMessage.innerHTML = `
                     <div class="success">
                         ✅ 任务创建成功！任务ID: ${task._id}
                     </div>
                 `;
-                
+
                 // 开始轮询任务状态
                 startPolling(task._id);
-                
+
                 // 刷新任务列表
                 setTimeout(() => loadTaskList(), 1000);
                 
@@ -444,6 +456,17 @@
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         // 加载任务列表
